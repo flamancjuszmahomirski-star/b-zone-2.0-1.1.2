@@ -1,30 +1,49 @@
-import { Text, View, StyleSheet, Image } from "react-native";
+import React, { useEffect } from "react";
+import { View, ActivityIndicator, StyleSheet, Platform } from "react-native";
+import { useRouter } from "expo-router";
+import * as Notifications from "expo-notifications";
+import { useAuth } from "@/src/context/AuthContext";
+import { api } from "@/src/api/client";
+import { colors } from "@/src/theme/tokens";
 
-const EXPO_PUBLIC_BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL;
+// Register device for push after auth (native only, non-blocking).
+async function registerForPush(userId: string) {
+  if (Platform.OS === "web") return;
+  try {
+    const { status } = await Notifications.requestPermissionsAsync();
+    if (status !== "granted") return;
+    const tokenResp = await Notifications.getDevicePushTokenAsync();
+    await api("/register-push", {
+      method: "POST",
+      body: { user_id: userId, platform: Platform.OS, device_token: String(tokenResp.data) },
+      retries: 0,
+    });
+  } catch {
+    // non-blocking
+  }
+}
 
 export default function Index() {
-  console.log(EXPO_PUBLIC_BACKEND_URL, "EXPO_PUBLIC_BACKEND_URL");
+  const { user, loading } = useAuth();
+  const router = useRouter();
+
+  useEffect(() => {
+    if (loading) return;
+    if (!user) {
+      router.replace("/login");
+    } else {
+      registerForPush(user.id);
+      router.replace("/(tabs)");
+    }
+  }, [user, loading]);
 
   return (
-    <View style={styles.container}>
-      <Image
-        source={require("../assets/images/app-image.png")}
-        style={styles.image}
-      />
+    <View style={styles.center}>
+      <ActivityIndicator color={colors.brand} size="large" />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: "#0c0c0c",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  image: {
-    width: "100%",
-    height: "100%",
-    resizeMode: "contain",
-  },
+  center: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: colors.surface },
 });

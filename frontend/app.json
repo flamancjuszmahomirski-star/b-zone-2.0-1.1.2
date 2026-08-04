@@ -1,24 +1,37 @@
 {
   "expo": {
-    "name": "frontend",
+    "name": "B-ZONE 2.0",
     "slug": "frontend",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "frontend",
-    "userInterfaceStyle": "automatic",
+    "scheme": "bzone",
+    "userInterfaceStyle": "dark",
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.emergent.appbuilder.o93mqy"
+      "bundleIdentifier": "com.emergent.appbuilder.o93mqy",
+      "infoPlist": {
+        "NSMicrophoneUsageDescription": "Record voice notes for site reports",
+        "NSCameraUsageDescription": "Take photos for reports and issues",
+        "NSPhotoLibraryUsageDescription": "Attach photos to reports and issues",
+        "NSLocationWhenInUseUsageDescription": "Tag report photos with site location"
+      }
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
-        "backgroundColor": "#000000"
+        "backgroundColor": "#121212"
       },
       "edgeToEdgeEnabled": true,
-      "package": "com.emergent.appbuilder.o93mqy"
+      "package": "com.emergent.appbuilder.o93mqy",
+      "permissions": [
+        "RECORD_AUDIO",
+        "CAMERA",
+        "READ_MEDIA_IMAGES",
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION"
+      ]
     },
     "web": {
       "bundler": "metro",
@@ -33,7 +46,22 @@
           "image": "./assets/images/splash-image.png",
           "imageWidth": 200,
           "resizeMode": "contain",
-          "backgroundColor": "#000000"
+          "backgroundColor": "#121212"
+        }
+      ],
+      "expo-notifications",
+      "expo-audio",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Attach photos to reports and issues",
+          "cameraPermission": "Take photos for reports and issues"
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Tag report photos with site location"
         }
       ]
     ],
