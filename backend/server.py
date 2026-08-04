@@ -35,16 +35,17 @@ load_dotenv(ROOT_DIR / ".env")
 # ---------------------------------------------------------------------------
 MONGO_URL = os.environ["MONGO_URL"]
 DB_NAME = os.environ["DB_NAME"]
-JWT_SECRET = os.environ.get("JWT_SECRET", "change-me-in-prod")
+JWT_SECRET = os.environ["JWT_SECRET"]  # required; injected from deployment secrets
 COMPANY_ID = os.environ.get("COMPANY_ID", "bzone-default")
 EMERGENT_LLM_KEY = os.environ.get("EMERGENT_LLM_KEY", "")
 PUSH_KEY = os.environ.get("EMERGENT_PUSH_KEY", "placeholder")
 PUSH_BASE_URL = "https://integrations.emergentagent.com"
-ADMIN_EMAIL = os.environ.get("SEED_ADMIN_EMAIL", "admin@bzone.app")
-ADMIN_PASSWORD = os.environ.get("SEED_ADMIN_PASSWORD", "Admin12345!")
+ADMIN_EMAIL = os.environ.get("SEED_ADMIN_EMAIL", "")
+ADMIN_PASSWORD = os.environ.get("SEED_ADMIN_PASSWORD", "")
 
-UPLOAD_DIR = ROOT_DIR / "uploads"
-UPLOAD_DIR.mkdir(exist_ok=True)
+# Uploads dir: use a writable/persistent path in production if provided, else local.
+UPLOAD_DIR = Path(os.environ.get("UPLOAD_DIR", str(ROOT_DIR / "uploads")))
+UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 ROLES = ("admin", "foreman", "subcontractor", "worker", "contractor")
 
@@ -1362,15 +1363,17 @@ async def root():
 async def startup():
     await db.users.create_index("email", unique=True)
     await db.users.create_index("id", unique=True)
-    admin = await db.users.find_one({"email": ADMIN_EMAIL.lower()})
-    if not admin:
-        await db.users.insert_one({
-            "id": new_id(), "company_id": COMPANY_ID, "email": ADMIN_EMAIL.lower(),
-            "hash": hash_pw(ADMIN_PASSWORD), "imie": "Administrator", "nazwisko": "B-Zone",
-            "rola": "admin", "avatar_url": None, "telefon": "", "status": "aktywny",
-            "stawka_godz_eur": 0.0, "jezyk": "pl", "created_at": now_iso(),
-        })
-        logger.info(f"Seeded admin: {ADMIN_EMAIL}")
+    # Seed the initial admin only when credentials are provided via environment.
+    if ADMIN_EMAIL and ADMIN_PASSWORD:
+        admin = await db.users.find_one({"email": ADMIN_EMAIL.lower()})
+        if not admin:
+            await db.users.insert_one({
+                "id": new_id(), "company_id": COMPANY_ID, "email": ADMIN_EMAIL.lower(),
+                "hash": hash_pw(ADMIN_PASSWORD), "imie": "Administrator", "nazwisko": "B-Zone",
+                "rola": "admin", "avatar_url": None, "telefon": "", "status": "aktywny",
+                "stawka_godz_eur": 0.0, "jezyk": "pl", "created_at": now_iso(),
+            })
+            logger.info(f"Seeded admin: {ADMIN_EMAIL}")
     if await db.delay_reasons.count_documents({"company_id": COMPANY_ID}) == 0:
         defaults = [
             ("Silny wiatr", "Strong wind"), ("Opady deszczu", "Rain"),
