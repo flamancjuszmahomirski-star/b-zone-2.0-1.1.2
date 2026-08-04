@@ -1,0 +1,42 @@
+{
+  "summary": "Etap 1 deployment-hardening round PASSED end-to-end. Backend: 70/70 = 40 backend_test.py + 19 test_p1_p3_features.py + 11 NEW test_etap1_hardening.py. Verified: (1) GET /api/ health returns {app,status:'ok'}; admin login with admin@bzone.app / Admin12345! works even after JWT_SECRET became required (no fallback) and SEED_ADMIN_* gated seeding — token successfully authorizes GET /api/auth/me and returns rola=admin without _id/hash leak. Missing/invalid tokens correctly 401. (2) GET /api/projects N+1 fix: single aggregation returns liczba_czlonkow — a fresh project with 2 approved members reports exactly 2; empty project reports 0; every returned project exposes an int liczba_czlonkow. (3) NEW DELETE /api/auth/me: throwaway registered+approved user's DELETE returns {deleted:true}, the same bearer token then returns 401 on GET /api/auth/me, subsequent POST /api/auth/login with the same creds returns 401, project_members rows for that user are removed (project member count drops back to 0), and audit-log contains akcja='usuniecie_wlasnego_konta' with the user_id. DELETE /api/auth/me without token → 401. (4) Frontend UI flow verified via Playwright on mobile 390x844: Profile screen shows a 'Usuń konto' link (testID=delete-account-btn), tapping opens ConfirmModal ('Usunąć konto na stałe? Tej operacji nie można cofnąć.') with 'Anuluj'/'Usuń konto' buttons; tapping the danger confirm (testID=confirm-ok) hits DELETE /api/auth/me, logs the user out, redirects to /login, and login with the same creds is rejected (401). (5) Regression sanity: pending registrations cannot login, project PUT/DELETE work (DELETE is soft-archive by design — sets status='zarchiwizowany'), P1-P3 feature suite (notifications action_url, delivery autor, hours approve/unapprove/week-summary) all green.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": [
+      {"component": "styles", "issue": "'shadow*' style props deprecated on react-native-web — use 'boxShadow'. Non-blocking. Reference: multiple screens (already flagged in iteration_2)."}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/backend_test.py",
+    "/app/backend/tests/test_p1_p3_features.py",
+    "/app/backend/tests/test_etap1_hardening.py",
+    "/app/test_reports/pytest/etap1_results.xml"
+  ],
+  "action_items": [
+    "None blocking. Optional: migrate shadow* -> boxShadow to silence RN-Web deprecation warnings.",
+    "Optional: password reset endpoint still returns reset_token in response body (MVP convenience) — remove before production."
+  ],
+  "critical_code_review_comments": [
+    "JWT_SECRET now required via os.environ['JWT_SECRET'] (server.py:38) — good; fails fast if the secret is missing on deploy.",
+    "Admin seeding correctly gated on SEED_ADMIN_EMAIL/SEED_ADMIN_PASSWORD (server.py:43-44); safe for prod.",
+    "GET /api/projects uses a single grouped aggregation for member counts (server.py:617-626) — N+1 eliminated.",
+    "DELETE /api/auth/me (server.py:480-486) deletes user + project_members and writes 'usuniecie_wlasnego_konta' audit; audit is created after user row deletion, but audit only stores user_id (string) so referential integrity is not required — acceptable.",
+    "Profile screen (profile.tsx:75-82,118-133) uses ConfirmModal with danger=true and testID=delete-account-btn / confirm-ok — clean UX; on failure a toast is shown, on success the user is logged out and routed to /login.",
+    "server.py still ~1420 lines — remains a candidate for splitting into routers per resource (already noted)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_etap1_hardening.py (created)"
+  ],
+  "success_rate": {"backend": "100% (70/70: 40 regression + 19 P1-P3 + 11 Etap1)", "frontend": "100% of the delete-account critical flow verified end-to-end on mobile viewport"},
+  "seed_data_creation": "TEST_E1_* users/projects created per test and cleaned up via fixture teardown. Seeded admin (admin@bzone.app) was NOT touched; only throwaway registered users used for self-delete verification. No production data modified.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Backend fully green after JWT_SECRET/SEED_ADMIN_* hardening. Admin creds: admin@bzone.app / Admin12345! (seeded on startup because SEED_ADMIN_* is set in backend/.env). If those env vars are removed in a future deploy, no admin will be created — tests will then fail at the fixture step by design. New file: /app/backend/tests/test_etap1_hardening.py covers config/health, projects N+1 fix, DELETE /api/auth/me self-service. Delete-account frontend testIDs: delete-account-btn (Profile link), confirm-ok (ConfirmModal danger button). Backend runs xdist via pytest.ini — backend_test.py must still run with '-n 0'; the etap1 suite is xdist-safe.",
+  "rca_of_issue": "N/A — no bugs found. All Etap 1 hardening changes (JWT_SECRET required, conditional admin seed, projects N+1 aggregation, DELETE /api/auth/me + Profile delete-account UI) verified functional."
+}

@@ -14,6 +14,7 @@ import { Card } from "@/src/components/Card";
 import { Button } from "@/src/components/Button";
 import { Avatar } from "@/src/components/Avatar";
 import { TextField } from "@/src/components/TextField";
+import { ConfirmModal } from "@/src/components/ConfirmModal";
 import { useToast } from "@/src/components/Toast";
 
 export default function Profile() {
@@ -28,6 +29,7 @@ export default function Profile() {
   const [telefon, setTelefon] = useState(user?.telefon || "");
   const [pinEnabled, setPinEnabled] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
 
   React.useEffect(() => {
     storage.getItem<boolean>("bzone.pinEnabled", false).then((v) => setPinEnabled(!!v));
@@ -70,6 +72,15 @@ export default function Profile() {
 
   const doLogout = async () => { await logout(); router.replace("/login"); };
 
+  const doDeleteAccount = async () => {
+    setDeleteOpen(false);
+    try {
+      await api("/auth/me", { method: "DELETE" });
+      await logout();
+      router.replace("/login");
+    } catch (e: any) { toast.show(e.message || t("error_generic"), "error"); }
+  };
+
   return (
     <View style={styles.screen}>
       <Header title={t("profile")} back />
@@ -103,7 +114,23 @@ export default function Profile() {
         </Card>
 
         <Button testID="logout-btn" title={t("logout")} onPress={doLogout} variant="danger" icon="log-out-outline" />
+
+        <Pressable testID="delete-account-btn" onPress={() => setDeleteOpen(true)} style={styles.deleteLink}>
+          <Ionicons name="trash-outline" size={16} color={colors.muted} />
+          <Text style={styles.deleteLinkText}>{t("delete_account")}</Text>
+        </Pressable>
       </ScrollView>
+
+      <ConfirmModal
+        visible={deleteOpen}
+        title={t("delete_account")}
+        message={t("delete_account_confirm")}
+        confirmLabel={t("delete_account")}
+        cancelLabel={t("cancel")}
+        danger
+        onConfirm={doDeleteAccount}
+        onCancel={() => setDeleteOpen(false)}
+      />
     </View>
   );
 }
@@ -118,4 +145,6 @@ const styles = StyleSheet.create({
   settingLabel: { color: colors.onSurface, fontSize: font.lg, flex: 1, fontWeight: "600" },
   langPill: { borderWidth: 1, borderColor: colors.brand, borderRadius: 999, paddingHorizontal: spacing.md, paddingVertical: spacing.xs },
   langText: { color: colors.brand, fontWeight: "800" },
+  deleteLink: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingVertical: spacing.md },
+  deleteLinkText: { color: colors.muted, fontSize: font.base, textDecorationLine: "underline" },
 });

@@ -477,6 +477,15 @@ async def update_me(body: ProfileIn, user: dict = Depends(current_user)):
     return doc
 
 
+@api.delete("/auth/me")
+async def delete_my_account(user: dict = Depends(current_user)):
+    """Self-service account deletion (App Store / Play Store requirement)."""
+    await db.users.delete_one({"id": user["id"]})
+    await db.project_members.delete_many({"user_id": user["id"]})
+    await audit(user["id"], "usuniecie_wlasnego_konta", "user", user["id"])
+    return {"deleted": True}
+
+
 @api.post("/auth/password-reset/request")
 async def reset_request(body: ResetRequestIn):
     user = await db.users.find_one({"email": body.email.lower()})
@@ -602,11 +611,19 @@ async def list_projects(status: str = "aktywny", user: dict = Depends(current_us
         ids = await user_project_ids(user)
         q["id"] = {"$in": ids}
     projects = await db.projects.find(q).sort("created_at", -1).to_list(1000)
+    project_ids = [p["id"] for p in projects]
+    # Single grouped aggregation for member counts (avoids per-project N+1).
+    counts: dict = {}
+    if project_ids:
+        agg = await db.project_members.aggregate([
+            {"$match": {"project_id": {"$in": project_ids}}},
+            {"$group": {"_id": "$project_id", "n": {"$sum": 1}}},
+        ]).to_list(len(project_ids))
+        counts = {row["_id"]: row["n"] for row in agg}
     out = []
     for p in projects:
         p = clean(p)
-        members = await db.project_members.count_documents({"project_id": p["id"]})
-        p["liczba_czlonkow"] = members
+        p["liczba_czlonkow"] = counts.get(p["id"], 0)
         out.append(p)
     return out
 
