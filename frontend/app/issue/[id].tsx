@@ -12,7 +12,7 @@ import { Header } from "@/src/components/Screen";
 import { Card } from "@/src/components/Card";
 import { Button } from "@/src/components/Button";
 import { StatusBadge } from "@/src/components/StatusBadge";
-import { LoadingState } from "@/src/components/States";
+import { LoadingState, EmptyState, ErrorState } from "@/src/components/States";
 import { SelectSheet } from "@/src/components/SelectSheet";
 import { ConfirmModal } from "@/src/components/ConfirmModal";
 import { useToast } from "@/src/components/Toast";
@@ -29,14 +29,18 @@ export default function IssueDetail() {
 
   const [issue, setIssue] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [errState, setErrState] = useState<null | "notfound" | "network">(null);
   const [statusPicker, setStatusPicker] = useState(false);
   const [pendingStatus, setPendingStatus] = useState<string | null>(null);
   const [deleteOpen, setDeleteOpen] = useState(false);
 
   const load = useCallback(async () => {
-    try { setIssue(await api(`/issues/${id}`)); } catch { setIssue(null); } finally { setLoading(false); }
+    setErrState(null);
+    try { setIssue(await api(`/issues/${id}`)); }
+    catch (e: any) { setIssue(null); setErrState(e?.status === 404 ? "notfound" : "network"); }
+    finally { setLoading(false); }
   }, [id]);
-  useFocusEffect(useCallback(() => { load(); }, [load]));
+  useFocusEffect(useCallback(() => { setLoading(true); load(); }, [load]));
 
   const statuses = [
     { value: "w_trakcie", label: "W trakcie / In progress" },
@@ -63,7 +67,8 @@ export default function IssueDetail() {
   };
 
   if (loading) return <View style={styles.screen}><Header title={t("issue")} back /><LoadingState /></View>;
-  if (!issue) return <View style={styles.screen}><Header title={t("issue")} back /></View>;
+  if (errState === "network") return <View style={styles.screen}><Header title={t("issue")} back /><ErrorState message={t("error_network")} onRetry={load} retryLabel={t("retry")} /></View>;
+  if (!issue) return <View style={styles.screen}><Header title={t("issue")} back /><EmptyState icon="alert-circle-outline" message={t("unavailable")} /></View>;
   const canDelete = issue.user_id === user?.id || user?.rola === "admin";
 
   return (

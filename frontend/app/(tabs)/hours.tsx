@@ -14,6 +14,7 @@ import { Button } from "@/src/components/Button";
 import { Avatar } from "@/src/components/Avatar";
 import { StatusBadge } from "@/src/components/StatusBadge";
 import { EmptyState, LoadingState } from "@/src/components/States";
+import { ConfirmModal } from "@/src/components/ConfirmModal";
 import { useToast } from "@/src/components/Toast";
 import { formatDate, todayISO, weekStart } from "@/src/utils/format";
 
@@ -38,20 +39,24 @@ export default function Hours() {
 
   const [date, setDate] = useState(todayISO());
   const [rows, setRows] = useState<any[]>([]);
+  const [summary, setSummary] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [editRow, setEditRow] = useState<any>(null);
   const [editHours, setEditHours] = useState("");
+  const [weekConfirm, setWeekConfirm] = useState(false);
 
   const load = useCallback(async () => {
     try {
       if (isManager) {
-        if (!selected) { setRows([]); return; }
-        const data = await api<any[]>(`/projects/${selected.id}/hours?data=${date}`);
-        setRows(data);
+        if (!selected) { setRows([]); setSummary([]); return; }
+        const [data, sum] = await Promise.all([
+          api<any[]>(`/projects/${selected.id}/hours?data=${date}`),
+          api<any[]>(`/projects/${selected.id}/hours/week-summary?tydzien_od=${weekStart(date)}`),
+        ]);
+        setRows(data); setSummary(sum);
       } else {
-        const data = await api<any[]>(`/hours/me?month=${todayISO().slice(0, 7)}`);
-        setRows(data);
+        setRows(await api<any[]>(`/hours/me?month=${todayISO().slice(0, 7)}`));
       }
     } catch {
       setRows([]);
@@ -61,38 +66,44 @@ export default function Hours() {
   }, [isManager, selected, date]);
 
   useFocusEffect(useCallback(() => { setLoading(true); load(); }, [load]));
-
   const onRefresh = async () => { setRefreshing(true); await load(); setRefreshing(false); };
 
-  const approveOne = async (id: string) => {
-    try { await api(`/hours/${id}/approve`, { method: "POST" }); toast.show(t("hours_approved")); load(); }
+  const daySummary = summary.find((s) => s.data === date);
+  const dayPending = daySummary?.pending ?? rows.filter((r) => r.status === "naliczone").length;
+  const weekPending = summary.reduce((s, d) => s + (d.pending || 0), 0);
+  const dayState = (d: string) => summary.find((s) => s.data === d)?.state || "none";
+
+  const act = async (fn: () => Promise<any>, msg?: string) => {
+    try { const r = await fn(); if (msg) toast.show(msg); load(); return r; }
     catch (e: any) { toast.show(e.message || t("error_generic"), "error"); }
   };
 
-  const approveDay = async () => {
-    if (!selected) return;
-    try {
+  const approveOne = (id: string) => act(() => api(`/hours/${id}/approve`, { method: "POST" }), t("hours_approved"));
+  const unapproveOne = (id: string) => act(() => api(`/hours/${id}/unapprove`, { method: "POST" }), t("saved"));
+  const approveDay = () => {
+    if (!selected || dayPending === 0) return;
+    act(async () => {
       const r = await api<{ zatwierdzono: number }>(`/projects/${selected.id}/hours/approve-day?data=${date}`, { method: "POST" });
-      toast.show(`${t("saved")} (${r.zatwierdzono})`); load();
-    } catch (e: any) { toast.show(e.message || t("error_generic"), "error"); }
+      toast.show(`${t("saved")}: ${r.zatwierdzono} ${t("entries")}`);
+      load();
+    });
   };
-
-  const approveWeek = async () => {
+  const doApproveWeek = () => {
+    setWeekConfirm(false);
     if (!selected) return;
-    try {
+    act(async () => {
       const r = await api<{ zatwierdzono: number }>(`/projects/${selected.id}/hours/approve-week?tydzien_od=${weekStart(date)}`, { method: "POST" });
-      toast.show(`${t("saved")} (${r.zatwierdzono})`); load();
-    } catch (e: any) { toast.show(e.message || t("error_generic"), "error"); }
+      toast.show(`${t("saved")}: ${r.zatwierdzono} ${t("entries")}`);
+      load();
+    });
   };
 
   const saveCorrection = async () => {
     if (!editRow) return;
     const val = parseFloat(editHours.replace(",", "."));
     if (isNaN(val)) return;
-    try {
-      await api(`/hours/${editRow.id}`, { method: "PUT", body: { liczba_godzin: val, zrodlo: "korekta" } });
-      setEditRow(null); toast.show(t("saved")); load();
-    } catch (e: any) { toast.show(e.message || t("error_generic"), "error"); }
+    await act(() => api(`/hours/${editRow.id}`, { method: "PUT", body: { liczba_godzin: val, zrodlo: "korekta" } }), t("saved"));
+    setEditRow(null);
   };
 
   return (
@@ -103,11 +114,13 @@ export default function Hours() {
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.dateStripWrap} contentContainerStyle={styles.dateStrip}>
           {lastDays(10).map((d) => {
             const active = d === date;
+            const st = dayState(d);
             const dt = new Date(d);
             return (
               <Pressable key={d} testID={`date-${d}`} onPress={() => setDate(d)} style={[styles.dateChip, active && styles.dateChipActive]}>
                 <Text style={[styles.dateChipDay, active && { color: "#fff" }]}>{dt.toLocaleDateString("pl-PL", { weekday: "short" })}</Text>
                 <Text style={[styles.dateChipNum, active && { color: "#fff" }]}>{dt.getDate()}</Text>
+                <View style={[styles.dot, { backgroundColor: st === "all" ? colors.success : st === "partial" ? colors.warning : "transparent" }]} />
               </Pressable>
             );
           })}
@@ -123,50 +136,70 @@ export default function Hours() {
           contentContainerStyle={{ padding: spacing.lg, gap: spacing.md, paddingBottom: insets.bottom + (isManager ? 96 : spacing.xxl) }}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.brand} />}
         >
-          {rows.map((r) => (
-            <Card key={r.id} testID={`hours-${r.id}`} style={styles.row}>
-              {isManager ? (
-                <>
-                  <Avatar uri={r.avatar_url} imie={r.imie} nazwisko={r.nazwisko} size={36} />
+          {rows.map((r) => {
+            const approved = r.status === "zatwierdzone";
+            return (
+              <Card key={r.id} testID={`hours-${r.id}`} style={styles.row}>
+                {isManager ? (
+                  <>
+                    <Avatar uri={r.avatar_url} imie={r.imie} nazwisko={r.nazwisko} size={36} />
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.name}>{r.imie} {r.nazwisko}</Text>
+                      <Text style={styles.sub}>{r.zrodlo}</Text>
+                    </View>
+                  </>
+                ) : (
                   <View style={{ flex: 1 }}>
-                    <Text style={styles.name}>{r.imie} {r.nazwisko}</Text>
-                    <Text style={styles.sub}>{r.zrodlo}</Text>
+                    <Text style={styles.name}>{r.project_nazwa}</Text>
+                    <Text style={styles.sub}>{formatDate(r.data, lang)}</Text>
                   </View>
-                </>
-              ) : (
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.name}>{r.project_nazwa}</Text>
-                  <Text style={styles.sub}>{formatDate(r.data, lang)}</Text>
-                </View>
-              )}
-              <Text style={styles.hoursVal}>{r.liczba_godzin}h</Text>
-              {isManager ? (
-                <View style={styles.actions}>
-                  <Pressable testID={`correct-${r.id}`} onPress={() => { setEditRow(r); setEditHours(String(r.liczba_godzin)); }} hitSlop={8}>
-                    <Ionicons name="create-outline" size={22} color={colors.muted} />
-                  </Pressable>
-                  {r.status === "naliczone" ? (
-                    <Pressable testID={`approve-${r.id}`} onPress={() => approveOne(r.id)} hitSlop={8}>
-                      <Ionicons name="checkmark-circle-outline" size={24} color={colors.success} />
+                )}
+                <Text style={styles.hoursVal}>{r.liczba_godzin}h</Text>
+                {isManager ? (
+                  <View style={styles.actions}>
+                    <Pressable testID={`correct-${r.id}`} onPress={() => { setEditRow(r); setEditHours(String(r.liczba_godzin)); }} hitSlop={8}>
+                      <Ionicons name="create-outline" size={22} color={colors.muted} />
                     </Pressable>
-                  ) : (
-                    <Ionicons name="checkmark-circle" size={24} color={colors.success} />
-                  )}
-                </View>
-              ) : (
-                <StatusBadge status={r.status} />
-              )}
-            </Card>
-          ))}
+                    {approved ? (
+                      <View style={styles.approvedWrap}>
+                        <StatusBadge status="zatwierdzone" label={t("approved_label")} />
+                        <Pressable testID={`unapprove-${r.id}`} onPress={() => unapproveOne(r.id)} hitSlop={8}>
+                          <Ionicons name="arrow-undo-outline" size={20} color={colors.muted} />
+                        </Pressable>
+                      </View>
+                    ) : r.status === "odrzucone" ? (
+                      <StatusBadge status="odrzucone" />
+                    ) : (
+                      <Pressable testID={`approve-${r.id}`} onPress={() => approveOne(r.id)} hitSlop={8}>
+                        <Ionicons name="checkmark-circle-outline" size={26} color={colors.success} />
+                      </Pressable>
+                    )}
+                  </View>
+                ) : (
+                  <StatusBadge status={r.status} />
+                )}
+              </Card>
+            );
+          })}
         </ScrollView>
       )}
 
       {isManager && rows.length > 0 && (
         <View style={[styles.footer, { paddingBottom: insets.bottom + spacing.sm }]}>
-          <Button title={t("approve_day")} onPress={approveDay} variant="secondary" style={{ flex: 1 }} testID="approve-day" />
-          <Button title={t("approve_week")} onPress={approveWeek} style={{ flex: 1 }} testID="approve-week" />
+          <Button title={dayPending === 0 ? t("all_approved") : t("approve_day")} onPress={approveDay} variant="secondary" disabled={dayPending === 0} style={{ flex: 1 }} testID="approve-day" />
+          <Button title={t("approve_week")} onPress={() => setWeekConfirm(true)} disabled={weekPending === 0} style={{ flex: 1 }} testID="approve-week" />
         </View>
       )}
+
+      <ConfirmModal
+        visible={weekConfirm}
+        title={t("approve_week_confirm")}
+        message={`${weekPending} ${t("entries")}`}
+        confirmLabel={t("approve_week")}
+        cancelLabel={t("cancel")}
+        onConfirm={doApproveWeek}
+        onCancel={() => setWeekConfirm(false)}
+      />
 
       <Modal visible={!!editRow} transparent animationType="fade" onRequestClose={() => setEditRow(null)}>
         <Pressable style={styles.backdrop} onPress={() => setEditRow(null)}>
@@ -194,17 +227,19 @@ export default function Hours() {
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.surface },
-  dateStripWrap: { maxHeight: 72, borderBottomWidth: 1, borderBottomColor: colors.divider },
+  dateStripWrap: { maxHeight: 80, borderBottomWidth: 1, borderBottomColor: colors.divider },
   dateStrip: { paddingHorizontal: spacing.lg, paddingVertical: spacing.md, gap: spacing.sm },
-  dateChip: { width: 52, height: 56, borderRadius: radius.md, backgroundColor: colors.surfaceSecondary, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: colors.border },
+  dateChip: { width: 52, height: 62, borderRadius: radius.md, backgroundColor: colors.surfaceSecondary, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: colors.border, gap: 2 },
   dateChipActive: { backgroundColor: colors.brand, borderColor: colors.brand },
   dateChipDay: { color: colors.muted, fontSize: 11, textTransform: "uppercase" },
   dateChipNum: { color: colors.onSurface, fontSize: font.lg, fontWeight: "800" },
+  dot: { width: 6, height: 6, borderRadius: 3 },
   row: { flexDirection: "row", alignItems: "center", gap: spacing.md },
   name: { color: colors.onSurface, fontSize: font.base, fontWeight: "700" },
   sub: { color: colors.muted, fontSize: font.sm },
   hoursVal: { color: colors.brand, fontSize: font.xl, fontWeight: "900" },
   actions: { flexDirection: "row", alignItems: "center", gap: spacing.md },
+  approvedWrap: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
   footer: { flexDirection: "row", gap: spacing.md, padding: spacing.lg, borderTopWidth: 1, borderTopColor: colors.divider, backgroundColor: colors.surface },
   backdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.6)", justifyContent: "center", padding: spacing.xl },
   sheet: { backgroundColor: colors.surfaceTertiary, borderRadius: radius.lg, padding: spacing.xl, gap: spacing.lg },

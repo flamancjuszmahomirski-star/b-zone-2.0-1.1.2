@@ -55,7 +55,7 @@ export const useToast = () => useContext(Ctx);
 const styles = StyleSheet.create({
   wrap: {
     position: "absolute",
-    top: Platform.OS === "web" ? 24 : 60,
+    bottom: Platform.OS === "web" ? 24 : 96,
     left: spacing.lg,
     right: spacing.lg,
     alignItems: "center",

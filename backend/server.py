@@ -113,7 +113,7 @@ async def notify(user_id: str, typ: str, tresc: str, obj_ref: str = None,
                  push: bool = True, title: str = "B-ZONE", action_url: str = None):
     await db.notifications.insert_one({
         "id": new_id(), "company_id": COMPANY_ID, "user_id": user_id,
-        "typ": typ, "tresc": tresc, "obiekt_ref": obj_ref,
+        "typ": typ, "tresc": tresc, "obiekt_ref": obj_ref, "action_url": action_url,
         "przeczytane": False, "created_at": now_iso(),
     })
     if push:
@@ -539,7 +539,7 @@ async def approve_user(user_id: str, body: ApproveUserIn, admin: dict = Depends(
         "status": "aktywny", "rola": body.rola, "stawka_godz_eur": body.stawka_godz_eur}})
     await audit(admin["id"], "zatwierdzenie_konta", "user", user_id,
                 {"status": u.get("status")}, {"status": "aktywny", "rola": body.rola})
-    await notify(user_id, "konto_zatwierdzone", "Twoje konto zostało zatwierdzone.", action_url="/")
+    await notify(user_id, "konto_zatwierdzone", "Twoje konto zostało zatwierdzone.", action_url="/(tabs)")
     doc = clean(await db.users.find_one({"id": user_id})); doc.pop("hash", None)
     return doc
 
@@ -769,7 +769,7 @@ async def approve_hours(hours_id: str, user: dict = Depends(require("admin", "fo
     await audit(user["id"], "zatwierdzenie_godzin", "work_hours", hours_id,
                 {"status": h["status"]}, {"status": "zatwierdzone"})
     await notify(h["user_id"], "godziny_zatwierdzone",
-                 f"Godziny z dnia {h['data']} zatwierdzone.", action_url="/hours")
+                 f"Godziny z dnia {h['data']} zatwierdzone.", action_url="/(tabs)/hours")
     return clean(await db.work_hours.find_one({"id": hours_id}))
 
 
@@ -781,8 +781,20 @@ async def reject_hours(hours_id: str, user: dict = Depends(require("admin", "for
     await db.work_hours.update_one({"id": hours_id},
                                    {"$set": {"status": "odrzucone", "zatwierdzil_id": user["id"]}})
     await audit(user["id"], "odrzucenie_godzin", "work_hours", hours_id)
-    await notify(h["user_id"], "godziny_odrzucone", f"Godziny z dnia {h['data']} odrzucone.")
+    await notify(h["user_id"], "godziny_odrzucone", f"Godziny z dnia {h['data']} odrzucone.", action_url="/(tabs)/hours")
     return {"status": "odrzucone"}
+
+
+@api.post("/hours/{hours_id}/unapprove")
+async def unapprove_hours(hours_id: str, user: dict = Depends(require("admin", "foreman"))):
+    h = await db.work_hours.find_one({"id": hours_id})
+    if not h:
+        raise HTTPException(404, "Nie znaleziono")
+    await db.work_hours.update_one({"id": hours_id},
+                                   {"$set": {"status": "naliczone", "zatwierdzil_id": None}})
+    await audit(user["id"], "cofniecie_zatwierdzenia_godzin", "work_hours", hours_id,
+                {"status": h["status"]}, {"status": "naliczone"})
+    return clean(await db.work_hours.find_one({"id": hours_id}))
 
 
 @api.post("/projects/{project_id}/hours/approve-day")
@@ -805,6 +817,23 @@ async def approve_week(project_id: str, tydzien_od: str = Query(...),
         {"$set": {"status": "zatwierdzone", "zatwierdzil_id": user["id"]}})
     await audit(user["id"], "zatwierdzenie_tygodnia", "project", project_id, None, {"od": tydzien_od})
     return {"zatwierdzono": res.modified_count}
+
+
+@api.get("/projects/{project_id}/hours/week-summary")
+async def week_summary(project_id: str, tydzien_od: str = Query(...),
+                       user: dict = Depends(require("admin", "foreman"))):
+    """Per-day approval status for the week strip: none/partial/all + counts."""
+    start = date.fromisoformat(tydzien_od)
+    out = []
+    for i in range(7):
+        day = (start + timedelta(days=i)).isoformat()
+        rows = await db.work_hours.find({"project_id": project_id, "data": day}).to_list(1000)
+        total = len(rows)
+        approved = len([r for r in rows if r["status"] == "zatwierdzone"])
+        pending = len([r for r in rows if r["status"] == "naliczone"])
+        state = "none" if total == 0 else ("all" if pending == 0 else "partial")
+        out.append({"data": day, "total": total, "approved": approved, "pending": pending, "state": state})
+    return out
 
 
 # ===========================================================================
@@ -840,7 +869,7 @@ async def approve_extra(eid: str, user: dict = Depends(require("admin", "foreman
     await db.extra_hours.update_one({"id": eid},
                                     {"$set": {"status": "zatwierdzone", "zatwierdzil_id": user["id"]}})
     await audit(user["id"], "zatwierdzenie_godzin_ekstra", "extra_hours", eid)
-    await notify(e["user_id"], "godziny_ekstra_zatwierdzone", "Godziny ekstra zatwierdzone.")
+    await notify(e["user_id"], "godziny_ekstra_zatwierdzone", "Godziny ekstra zatwierdzone.", action_url="/(tabs)/hours")
     return {"status": "zatwierdzone"}
 
 
@@ -852,7 +881,7 @@ async def reject_extra(eid: str, user: dict = Depends(require("admin", "foreman"
     await db.extra_hours.update_one({"id": eid},
                                     {"$set": {"status": "odrzucone", "zatwierdzil_id": user["id"]}})
     await audit(user["id"], "odrzucenie_godzin_ekstra", "extra_hours", eid)
-    await notify(e["user_id"], "godziny_ekstra_odrzucone", "Godziny ekstra odrzucone.")
+    await notify(e["user_id"], "godziny_ekstra_odrzucone", "Godziny ekstra odrzucone.", action_url="/(tabs)/hours")
     return {"status": "odrzucone"}
 
 
@@ -1162,6 +1191,8 @@ async def get_delivery(did: str, user: dict = Depends(current_user)):
     r = clean(r)
     p = await db.projects.find_one({"id": r["project_id"]})
     r["project_nazwa"] = p["nazwa"] if p else "?"
+    a = await db.users.find_one({"id": r["autor_id"]})
+    r["autor"] = f"{a['imie']} {a['nazwisko']}" if a else "?"
     return r
 
 

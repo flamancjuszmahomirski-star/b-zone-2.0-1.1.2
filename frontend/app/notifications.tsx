@@ -34,14 +34,13 @@ export default function Notifications() {
   const onRefresh = async () => { setRefreshing(true); await load(); setRefreshing(false); };
 
   const open = async (item: any) => {
-    if (!item.przeczytane) { api(`/notifications/${item.id}/read`, { method: "PATCH" }).catch(() => {}); }
-    // action_url is derived from notification type/ref for in-app navigation
-    if (item.obiekt_ref && item.typ.includes("raport")) router.push(`/report/${item.obiekt_ref}`);
-    else if (item.obiekt_ref && item.typ.includes("zgloszenie")) router.push(`/issue/${item.obiekt_ref}`);
-    else if (item.obiekt_ref && item.typ.includes("dostawa")) router.push(`/delivery/${item.obiekt_ref}`);
-    else if (item.typ.includes("konto")) router.push("/users");
+    if (!item.przeczytane) {
+      await api(`/notifications/${item.id}/read`, { method: "PATCH" }).catch(() => {});
+    }
+    const url: string | undefined = item.action_url;
+    if (url) router.push(url as any);
     else load();
-    setTimeout(load, 300);
+    setTimeout(load, 400);
   };
 
   const markAll = async () => { await api("/notifications/read-all", { method: "POST" }); load(); };

@@ -1,0 +1,46 @@
+{
+  "summary": "Post-audit P1..P6 re-test PASSED. Backend: 40/40 regression (backend_test.py -n 0) + 19/19 new P1..P3 feature tests (test_p1_p3_features.py). Verified: (P1) every notification carries an action_url — /(tabs) for konto_zatwierdzone, /report/{id} for new report, /issue/{id} for new issue, /delivery/{id} for new delivery, /users for new-account (admin), /(tabs)/hours for hours approved. PATCH /api/notifications/{id}/read works. (P2) GET /api/deliveries/{id} now returns 'autor'; report/issue/delivery detail screens have LoadingState/ErrorState(retry)/EmptyState('Ten wpis jest już niedostępny') for 404 — verified in source. (P3) POST /api/hours/{id}/unapprove flips status to naliczone, requires admin/foreman (403 for worker), 404 for missing id, writes audit action 'cofniecie_zatwierdzenia_godzin'. GET /api/projects/{id}/hours/week-summary?tydzien_od=... returns 7 rows with data/total/approved/pending/state (none|partial|all); 403 for worker. Hours tab has StatusBadge Zatwierdzone + undo icon, day/week approve buttons disabled when 0 pending with correct label, ConfirmModal + toast with N wpisów, week strip green/amber dots. (P4) Toast wrap uses bottom: 24 (web) — bottom placement confirmed in /app/frontend/src/components/Toast.tsx. (P5) Same (tabs) layout served to worker and subcontractor (only contractor gets href:null on hours/issues). (P6) Login shows bison-in-hard-hat logo (assets/images/bzone-logo-square.png) — verified via UI screenshot. Auth+approval+project+report+issue+delivery regression flows all green.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "notifications", "issue": "konto_zatwierdzone action_url points to '/(tabs)' rather than a resource — intentional (welcome to home tab). OK per spec."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "hours (team)", "issues": ["Empty projects show only date strip with no dots — expected since no data. When a member is added, dots and approve buttons behave correctly per code review."]}
+    ],
+    "react_native_issues": [
+      {"component": "styles", "issue": "'shadow*' style props deprecated on react-native-web — use 'boxShadow'. Non-blocking. Reference: multiple screens; also Toast.tsx:75-78."},
+      {"component": "props.pointerEvents", "issue": "props.pointerEvents is deprecated — use style.pointerEvents. Reference: Toast.tsx:40 (Animated.View pointerEvents='none')."}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/backend_test.py",
+    "/app/backend/tests/test_p1_p3_features.py",
+    "/app/test_reports/pytest/pytest_results.xml",
+    "/app/test_reports/pytest/p1_p3_results.xml"
+  ],
+  "action_items": [
+    "Optional: migrate shadow* -> boxShadow and props.pointerEvents -> style.pointerEvents to silence RN Web deprecation warnings.",
+    "Optional: password reset endpoint still returns raw reset_token in response body (MVP convenience) — remove before production."
+  ],
+  "critical_code_review_comments": [
+    "server.py ~1400 lines — consider splitting into routers per resource for maintainability.",
+    "clean() consistently strips MongoDB _id; no ObjectId leaks in any tested endpoint.",
+    "notify() catches push failures broadly (correct with placeholder EMERGENT_PUSH_KEY); DB write succeeds regardless.",
+    "week-summary endpoint iterates 7 queries in a loop — O(7 * find) — fine for MVP, could be a single aggregation later.",
+    "unapprove endpoint correctly resets zatwierdzil_id to None and writes audit with before/after status."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_p1_p3_features.py (created)"
+  ],
+  "success_rate": {"backend": "100% (59/59: 40 regression + 19 P1-P3)", "frontend": "100% of critical UI flows verified (login logo, notifications feed, users, team-hours screen shell)"},
+  "seed_data_creation": "Fixture-scoped TEST_ users/projects/hours/report/issue/delivery are created and cleaned up. Residual: registration flow leaves brief pending user which fixture teardown deletes. No production data touched.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "pytest.ini forces '-n 2 --dist loadscope' — backend_test.py has cross-class shared module state so it MUST run with '-n 0'. New test_p1_p3_features.py is safe under xdist because it uses a module-scoped fixture per worker and each test is self-contained. Admin creds: admin@bzone.app / Admin12345!. Use .com email TLDs (pydantic EmailStr rejects .test).",
+  "rca_of_issue": "N/A — all P1-P6 changes verified working. No new bugs found."
+}

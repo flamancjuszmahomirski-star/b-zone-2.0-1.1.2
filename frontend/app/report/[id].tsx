@@ -13,7 +13,7 @@ import { Card } from "@/src/components/Card";
 import { Button } from "@/src/components/Button";
 import { Avatar } from "@/src/components/Avatar";
 import { StatusBadge } from "@/src/components/StatusBadge";
-import { LoadingState } from "@/src/components/States";
+import { LoadingState, EmptyState, ErrorState } from "@/src/components/States";
 import { ConfirmModal } from "@/src/components/ConfirmModal";
 import { useToast } from "@/src/components/Toast";
 import { formatDate, formatDateTime } from "@/src/utils/format";
@@ -29,14 +29,18 @@ export default function ReportDetail() {
 
   const [report, setReport] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [errState, setErrState] = useState<null | "notfound" | "network">(null);
   const [photo, setPhoto] = useState<any>(null);
   const [rejectOpen, setRejectOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
 
   const load = useCallback(async () => {
-    try { setReport(await api(`/reports/${id}`)); } catch { setReport(null); } finally { setLoading(false); }
+    setErrState(null);
+    try { setReport(await api(`/reports/${id}`)); }
+    catch (e: any) { setReport(null); setErrState(e?.status === 404 ? "notfound" : "network"); }
+    finally { setLoading(false); }
   }, [id]);
-  useFocusEffect(useCallback(() => { load(); }, [load]));
+  useFocusEffect(useCallback(() => { setLoading(true); load(); }, [load]));
 
   const approve = async () => {
     try { await api(`/reports/${id}/approve`, { method: "POST" }); toast.show(t("saved")); load(); }
@@ -54,7 +58,8 @@ export default function ReportDetail() {
   };
 
   if (loading) return <View style={styles.screen}><Header title={t("report")} back /><LoadingState /></View>;
-  if (!report) return <View style={styles.screen}><Header title={t("report")} back /></View>;
+  if (errState === "network") return <View style={styles.screen}><Header title={t("report")} back /><ErrorState message={t("error_network")} onRetry={load} retryLabel={t("retry")} /></View>;
+  if (!report) return <View style={styles.screen}><Header title={t("report")} back /><EmptyState icon="alert-circle-outline" message={t("unavailable")} /></View>;
 
   const canDelete = report.user_id === user?.id || user?.rola === "admin";
 
