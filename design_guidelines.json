@@ -1,0 +1,162 @@
+{
+  "app_name": "B-ZONE 2.0",
+  "personality": "7 Dark-First Utility DARK",
+  "personality_one_liner": "A sharp, tactical command center that prioritizes glanceable metrics, immediate hierarchy, and durable utility for construction field operations.",
+  "color": {
+    "surface": "#121212",
+    "onSurface": "#F3F4F6",
+    "surfaceSecondary": "#1A1A1A",
+    "onSurfaceSecondary": "#E5E7EB",
+    "surfaceTertiary": "#262626",
+    "onSurfaceTertiary": "#D1D5DB",
+    "surfaceInverse": "#F9FAFB",
+    "onSurfaceInverse": "#111827",
+    "brand": "#F97316",
+    "brandPrimary": "#F97316",
+    "onBrandPrimary": "#FFFFFF",
+    "brandSecondary": "#EA580C",
+    "onBrandSecondary": "#FFFFFF",
+    "brandTertiary": "#431407",
+    "onBrandTertiary": "#FED7AA",
+    "success": "#10B981",
+    "onSuccess": "#FFFFFF",
+    "warning": "#F59E0B",
+    "onWarning": "#FFFFFF",
+    "error": "#EF4444",
+    "onError": "#FFFFFF",
+    "info": "#3B82F6",
+    "onInfo": "#FFFFFF",
+    "border": "#262626",
+    "borderStrong": "#404040",
+    "divider": "#1F1F1F"
+  },
+  "typography": {
+    "displayFontFamily": "Barlow Condensed",
+    "textFontFamily": "DM Sans",
+    "scale": {
+      "sm": 12,
+      "base": 14,
+      "lg": 16,
+      "xl": 20,
+      "2xl": 24
+    }
+  },
+  "spacing": {
+    "rule": "Handle spacing correctly dont have extra spaces where its not required, handle padding and margin corectly and subtle for buttons and components",
+    "xs": 4,
+    "sm": 8,
+    "md": 12,
+    "lg": 16,
+    "xl": 24,
+    "2xl": 32,
+    "3xl": 48
+  },
+  "radius_tokens": {
+    "sm": 6,
+    "md": 12,
+    "lg": 20,
+    "pill": 999
+  },
+  "shadow_tier": "0",
+  "navigation": "bottom_tabs",
+  "icon_set": "Phosphor",
+  "glassmorphism": {
+    "enabled": false,
+    "do's": [],
+    "dont's": [
+      "No glassmorphism per Dark-First Utility constraints on dense data screens. Use solid surfaceSecondary instead."
+    ]
+  },
+  "platform_libraries": {
+    "glass": {
+      "ios": "expo-glass-effect",
+      "android": "expo-blur",
+      "low_end_android_fallback": "solid surfaceSecondary"
+    },
+    "image": "expo-image",
+    "blur": "expo-blur",
+    "bottom_sheet": "@gorhom/bottom-sheet",
+    "animation": "react-native-reanimated",
+    "gesture": "react-native-gesture-handler"
+  },
+  "screens": [
+    {
+      "name": "Auth",
+      "purpose": "Login, registration, and biometric access with 'pending admin approval' states.",
+      "states": {
+        "loading": "Centered brand-tinted spinner.",
+        "empty": "N/A",
+        "error": "Standard alert or inline red warning text."
+      },
+      "layout": "Hero logo area (initials 'BZ' with brand tint until PNG provided), inputs for email/PIN. Single column, large touch targets. Submit button sticky at bottom in KeyboardAvoidingView."
+    },
+    {
+      "name": "Dashboard (Home)",
+      "purpose": "Role-specific operational surface showing today's progress, open tasks, and metrics.",
+      "states": {
+        "loading": "Skeleton UI matching the card sizes.",
+        "empty": "Illustration of an empty site with 'No active projects today'.",
+        "error": "Error message with 'Reload Dashboard' CTA."
+      },
+      "layout": "Top app bar with project selector and avatar. Hero summary strip (Today's progress/open issues) using condensed typography for numbers. 4-column metrics grid for quick stats. Stacked cards for recent activities or issues below. Use dark gray surfaces with orange accents for critical alerts."
+    },
+    {
+      "name": "Daily Report",
+      "purpose": "Single-purpose screen for capturing voice notes, generating transcripts, and attaching photos.",
+      "states": {
+        "loading": "Transcribing indicator overlay.",
+        "empty": "N/A - form is always ready to accept input.",
+        "error": "Red inline text if voice recognition fails or upload fails."
+      },
+      "layout": "Vertical column form. Top bar with project/date. Primary action area with a large 'Record Voice Note' button. Live transcript review panel below it. Photo attachment strip (horizontal scroll). Sticky 'Submit Report' CTA pinned to the bottom above safe area."
+    },
+    {
+      "name": "Time Tracker & Calendar",
+      "purpose": "Review own hours or approve worker hours (Foreman/Admin).",
+      "states": {
+        "loading": "Calendar skeleton load.",
+        "empty": "'No logged hours this week' message with icon.",
+        "error": "'Failed to sync hours' with a retry CTA."
+      },
+      "layout": "Sticky weekly calendar strip at top. List view of daily hour logs below. Each row shows worker name/avatar, hours worked, and extra hours. Approval toggle on the right side for Foremen. Bold condensed fonts for hour numbers."
+    },
+    {
+      "name": "Projects & Notices",
+      "purpose": "CRUD project views, viewing project details and managing delivery notices/PDFs.",
+      "states": {
+        "loading": "List skeleton.",
+        "empty": "'No active projects' or 'No delivery notices'.",
+        "error": "Standard retry state."
+      },
+      "layout": "List of project cards featuring thumbnail photos (construction site). Clicking a project opens detail view with tabs: Overview, Issues, Notices, Reports. Delivery notices use a compact row layout with a PDF/attachment icon indicator."
+    }
+  ],
+  "images": {
+    "hero_construction": {
+      "url": "https://images.unsplash.com/photo-1718715391199-5fc33b8cf78b?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA1NTZ8MHwxfHNlYXJjaHwzfHxjb25zdHJ1Y3Rpb24lMjBzaXRlJTIwbW9kZXJuJTIwd29ya2VyfGVufDB8fHx8MTc4NTgxMDE1MXww&ixlib=rb-4.1.0&q=85",
+      "alt": "Modern construction site workers"
+    },
+    "avatar_professional": {
+      "url": "https://images.pexels.com/photos/20157010/pexels-photo-20157010.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+      "alt": "Professional male avatar portrait"
+    }
+  },
+  "instructions_to_main_agent": [
+    "IMPLEMENT Dark-First Utility DARK design system: NO pure black for surfaces (#121212 base), sharp typography (Barlow Condensed for metrics, DM Sans for UI).",
+    "NO glassmorphism. Use solid `#1A1A1A` and `#262626` for depth per Utility constraints.",
+    "BISON LOGO FALLBACK: Use a brand-tinted square container with the text initials 'BZ' sized to fill the container at weight 500, until the real PNG logo is provided.",
+    "ALL SCREENS must have Loading, Empty, and Error states clearly defined and taking flex: 1.",
+    "DAILY REPORT screen must be optimized for field work: large touch targets for the Voice Note record button, horizontal strip for photos, and a sticky Submit button placed at the bottom.",
+    "STICKY CTAs: The primary action button (Save, Submit, Start) must be fixed at the bottom of the screen (inside a padded fixed container) so it never scrolls out of view.",
+    "CURRENCY FORMATTING: Hardcode formatting logic or provide helper to display as '1,2 tys. €'.",
+    "IMAGE SCRIM: Whenever text sits on a thumbnail or hero photo, apply the vertical gradient scrim (transparent to >=70% surfaceInverse) to guarantee contrast.",
+    "Use Phosphor icons with filled/outlined state distinction for active/inactive tabs.",
+    "Add tactile feedback (haptics) on critical interactions: submitting a report, starting/stopping voice note, changing tabs, approving hours."
+  ],
+  "haptics": {
+    "submit_report": "success",
+    "record_voice_toggle": "medium",
+    "approve_hours": "light",
+    "tab_press": "light"
+  }
+}
