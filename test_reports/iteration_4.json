@@ -1,0 +1,40 @@
+{
+  "summary": "Cache-clear/version-bump regression round PASSED. After the .metro-cache clear + app.json 1.0.0→1.0.1 bump, the fresh Metro bundle rebuilt cleanly (6912ms, 1561 modules, no errors) and all previously-added Etap-1 Polish strings render in it. Backend 70/70 green: 40/40 backend_test.py (regression: auth + approval, project CRUD w/ member-count aggregation, report create+approve/reject with reason required, issue create+status, delivery create+decision) + 19/19 test_p1_p3_features.py (notification action_url per type + PATCH read, delivery autor, hours unapprove + week-summary green/amber, RBAC 403 for worker) + 11/11 test_etap1_hardening.py (JWT_SECRET required, SEED_ADMIN_* gated admin seed reachable, projects N+1 fix returns int liczba_czlonkow, DELETE /api/auth/me for a THROWAWAY approved user returns {deleted:true} then token 401s, project_members purged, audit 'usuniecie_wlasnego_konta' written; seeded admin@bzone.app NOT touched). Frontend smoke (mobile 390x844): Login renders bison logo + PL strings, Profile shows 'Usuń konto' link (testID=delete-account-btn) which opens ConfirmModal 'Usunąć konto na stałe?' with testID=confirm-cancel/confirm-ok, Notifications shows 'Centrum powiadomień' + 'Brak powiadomień.' empty state, Hours tab renders 'Moje godziny' + bottom tab bar, Profile 'Język' chip shows current PL. No red screens, no red console errors from app code — only benign RN-Web deprecations (shadow*, props.pointerEvents) and the expected 401s for anonymous /api/notifications/* fetches during a redirect race. Deprecated packages detected: none new.",
+  "backend_issues": { "critical": [], "minor": [] },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": [
+      {"component": "styles", "issue": "'shadow*' style props deprecated on react-native-web — migrate to 'boxShadow'. Non-blocking, already flagged in iteration_2/3."},
+      {"component": "props.pointerEvents", "issue": "props.pointerEvents is deprecated — use style.pointerEvents. Reference: /app/frontend/src/components/Toast.tsx:40 (Animated.View pointerEvents='none'). Non-blocking, already flagged in iteration_2."}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/backend_test.py",
+    "/app/backend/tests/test_p1_p3_features.py",
+    "/app/backend/tests/test_etap1_hardening.py",
+    "/app/test_reports/pytest/iter4_backend.xml",
+    "/app/test_reports/pytest/iter4_features.xml"
+  ],
+  "action_items": [
+    "None blocking. Optional cosmetic: migrate shadow* -> boxShadow and props.pointerEvents -> style.pointerEvents to silence RN-Web deprecation warnings (Toast.tsx + several screens).",
+    "Optional: password-reset endpoint still returns reset_token in response body (MVP convenience) — remove before production."
+  ],
+  "critical_code_review_comments": [
+    "app.json version correctly bumped to 1.0.1; Metro produced a fresh bundle (6912ms, 1561 modules) with no stale-cache reuse.",
+    "Profile screen still binds Usuń konto correctly (testID=delete-account-btn -> ConfirmModal danger=true -> DELETE /api/auth/me -> logout).",
+    "Backend surface unchanged since iteration_3 (as expected) — no regressions in JWT_SECRET requirement, admin seed gating, projects aggregation, or DELETE /api/auth/me.",
+    "server.py still ~1420 lines — remains a candidate for splitting into per-resource routers (already noted in prior iterations)."
+  ],
+  "updated_files": [],
+  "success_rate": {
+    "backend": "100% (70/70: 40 regression + 19 P1-P3 + 11 Etap1)",
+    "frontend": "100% smoke of Etap-1 UI touchpoints rendered from the fresh bundle (Login logo/PL, Profile delete-account + confirm modal + testIDs, Notifications screen, Hours tab)"
+  },
+  "seed_data_creation": "Fixture-scoped TEST_* users/projects created and cleaned up per test run. Seeded admin (admin@bzone.app) was NOT modified; self-delete test used throwaway registered+approved users only.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Env: EXPO_PUBLIC_BACKEND_URL must be exported before pytest for test_p1_p3_features.py / test_etap1_hardening.py (they fail-fast if empty). backend_test.py must still run with '-n 0' due to cross-class shared state. Admin: admin@bzone.app / Admin12345!. Delete-account testIDs: delete-account-btn (Profile), confirm-cancel/confirm-ok (ConfirmModal). Push relay uses placeholder EMERGENT_PUSH_KEY — 401 push responses are expected and non-blocking; DB notifications still persist and action_url is set for every notification type.",
+  "rca_of_issue": "N/A — no bugs found. The reported production-bundle issue (byte-identical JS missing recent PL strings) was caused by a stale .metro-cache/ FileStore reuse. Clearing the in-project Metro cache + bumping app.json version forced a clean rebundle; verified all Etap-1 PL strings render in the new bundle and no functional regressions were introduced."
+}
