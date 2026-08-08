@@ -1,0 +1,39 @@
+{
+  "summary": "Regression sanity round after stray corrupt-named file was deleted from /app/frontend. All backend + frontend flows still green — no regressions from the packaging-only fix. Backend 70/70 PASS (40/40 backend_test.py regression + 30/30 test_p1_p3_features.py + test_etap1_hardening.py combined). Frontend smoke on mobile (390x844): fresh Metro bundle rebuilt cleanly (6912ms, 1561 modules, no bundling errors), login screen renders with bison logo + PL strings (E-mail, Hasło, Zaloguj się, Nie masz konta? Zarejestruj się, PL locale chip), admin login with admin@bzone.app / Admin12345! succeeds and lands on /Pulpit dashboard (Administrator 👋, widgets: 1 Aktywne projekty / 4 Konta do zatwierdzenia / 3 Raporty / 3 Otwarte zgłoszenia, bottom tabs Pulpit/Raporty/Godziny/Zgłoszenia/Więcej, bell shows 9+). Spot-checks: project card opens /project/{id} detail with Przegląd/Zespół/Raporty tabs + Kod/Nazwa klienta/Adres/Godziny pracy/Termin + Archiwizuj CTA; notifications bell opens /notifications 'Centrum powiadomień' with populated list. Zero console errors during full flow. No red-screen. No new deprecated packages detected. Confirmed no non-printable-named files remain under /app/frontend (LC_ALL=C find sweep clean).",
+  "backend_issues": { "critical": [], "minor": [] },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": [
+      {"component": "styles", "issue": "'shadow*' style props deprecated on react-native-web — migrate to 'boxShadow'. Non-blocking (carried over from iterations 2-4)."},
+      {"component": "props.pointerEvents", "issue": "props.pointerEvents deprecated — use style.pointerEvents. Reference: /app/frontend/src/components/Toast.tsx:40. Non-blocking (carried over from iterations 2-4)."}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/backend_test.py",
+    "/app/backend/tests/test_p1_p3_features.py",
+    "/app/backend/tests/test_etap1_hardening.py",
+    "/app/test_reports/pytest/iter5_backend.xml",
+    "/app/test_reports/pytest/iter5_features.xml"
+  ],
+  "action_items": [
+    "None. Regression sanity clean — packaging-only fix confirmed to have zero functional impact.",
+    "Optional (carried-over cosmetic): migrate shadow*/pointerEvents to modern RN-Web equivalents."
+  ],
+  "critical_code_review_comments": [
+    "Bundle rebuilt fresh from a clean Metro run (6912ms / 1561 modules) — no stale cache warnings.",
+    "No non-printable-named files remain in /app/frontend (verified via LC_ALL=C find).",
+    "server.py still ~1420 lines — remains a candidate for splitting into per-resource routers (already noted in prior iterations, non-blocking)."
+  ],
+  "updated_files": [],
+  "success_rate": {
+    "backend": "100% (70/70: 40 backend_test + 30 features/hardening combined)",
+    "frontend": "100% smoke — login → dashboard → project detail → notifications, zero console errors, no red screen"
+  },
+  "seed_data_creation": "Fixture-scoped TEST_* users/projects created and cleaned up automatically by pytest fixtures. Seeded admin (admin@bzone.app) NOT modified. Self-delete tests used throwaway registered+approved users only.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Env: export EXPO_PUBLIC_BACKEND_URL=https://app-builder-11766.preview.emergentagent.com before pytest. backend_test.py must run with '-n 0' (shared module state). Admin: admin@bzone.app / Admin12345!. Login flow: /login has 2 <input> (email, password), submit button = text 'Zaloguj się'. Dashboard route = '/', project detail = '/project/{id}', notifications = '/notifications'.",
+  "rca_of_issue": "N/A — no bugs. Prior stray file with invalid-UTF-8 name (EAS tarball breaker) was deleted; this round confirms the deletion did not regress any runtime behavior. Metro bundles cleanly, backend surface unchanged, admin login + core flows all green."
+}
