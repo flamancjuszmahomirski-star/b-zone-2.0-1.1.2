@@ -33,6 +33,12 @@ admin, foreman (brygadzista), subcontractor (podwykonawca), worker (pracownik), 
 - **P2 (Etap 5)**: Reasoning/voice AI assistant calling the same REST endpoints + deep-link navigation
 - **Tech debt**: migrate deprecated RN Web `shadow*`/`pointerEvents` style props (web-only warnings)
 
+## Implemented (2026-08-09) — Etap 2A COMPLETE (Modele/Zrzuty)
+- Backend: element_types (słownik, admin-only mutacje), folders→views→elements (admin+foreman CRUD), statusy do_wykonania/zgloszony_gotowy/odebrany, element_history z report_id, odbiory multi (receive/unreceive z powodem + 409 gdy ujęte w rozliczeniu), pending-receipt, modele_summary (postęp = odebrane/wszystkie). Pola projektu: tryb_rozliczenia (akordowy/godzinowy/mieszany) + stawka_sprzedazy_godz. ujete_w_rozliczeniu_id i geometria_json tylko utworzone, bez logiki.
+- Frontend: ekrany models/[projectId], folder/[id] (upload zrzutu), view/[id] (canvas zoom/pan, tryb edycji + seria, panel odbioru multi), element/[id] (oś czasu), receipts/[projectId], element-types. Integracje: kafel Modele + Odbiory na karcie projektu, ElementPicker w report-new (2 tryby: lista + znaczniki na widoku), pola billing w project-form (stawka sprzedaży wymagana dla godz/mieszany), link "Słownik typów" w Więcej (admin-only).
+- BEZPIECZEŃSTWO: strip_project_financials po stronie backendu — kontrahent NIE widzi stawka_sprzedazy_godz/bryg_widzi_stawki/termin_platnosci_*/vat_tryb (potwierdzone surową odpowiedzią API). Wszystkie tabele mają company_id.
+- Weryfikacja: backend 33/33 test_etap2a_models.py + 70/70 regresja; frontend flow zielony (iteration_6.json). Cache Metro wyczyszczony przed zakończeniem.
+
 ## Notes / Not-yet-live
 - Push notifications: structure implemented (register-push + server-side send_push on events). Requires `google-services.json` (Android) + deploy → build to actually deliver; does NOT work in Expo Go.
 - App logo: bison-in-hard-hat placeholder ("BZ"/hammer) — swap in real PNG when provided (icon, splash, login).

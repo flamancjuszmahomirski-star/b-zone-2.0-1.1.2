@@ -206,4 +206,10 @@ const styles = StyleSheet.create({
   memberRole: { color: colors.muted, fontSize: font.sm },
   reportRow: { flexDirection: "row", alignItems: "center", gap: spacing.md },
   footer: { padding: spacing.lg, borderTopWidth: 1, borderTopColor: colors.divider, backgroundColor: colors.surface },
+  modelsTile: { backgroundColor: colors.surfaceSecondary, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, padding: spacing.lg, gap: spacing.md },
+  modelsHead: { flexDirection: "row", alignItems: "center", gap: spacing.md },
+  modelsIcon: { width: 44, height: 44, borderRadius: 8, backgroundColor: colors.surfaceTertiary, alignItems: "center", justifyContent: "center" },
+  modelsTitle: { color: colors.onSurface, fontSize: font.lg, fontWeight: "800" },
+  modelsMeta: { color: colors.muted, fontSize: font.sm, marginTop: 2 },
+  modelsPct: { color: colors.brand, fontSize: font.xl, fontWeight: "900" },
 });
