@@ -50,7 +50,12 @@ export const font = {
   xxxl: 32,
 };
 
-// Status color mapping (Polish status keys).
+// Element status color mapping (Etap 2A).
+export const elementStatusColor = (status: string): string => {
+  if (status === "odebrany") return colors.success;
+  if (status === "zgloszony_gotowy") return colors.warning;
+  return colors.muted; // do_wykonania
+};
 export const statusColor = (status: string): string => {
   const s = (status || "").toLowerCase();
   if (["zatwierdzony", "zatwierdzone", "aktywny", "rozwiazane", "potwierdzona"].includes(s))

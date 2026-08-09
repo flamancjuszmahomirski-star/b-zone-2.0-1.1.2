@@ -81,6 +81,18 @@ def clean(doc: dict) -> dict:
     return doc
 
 
+# Commercially sensitive project fields never exposed to the client (contractor).
+_FIN_PROJECT_FIELDS = ("stawka_sprzedazy_godz", "bryg_widzi_stawki",
+                       "termin_platnosci_klient_dni", "termin_platnosci_ekipa_dni", "vat_tryb")
+
+
+def strip_project_financials(p: dict, role: str) -> dict:
+    if role == "contractor":
+        for f in _FIN_PROJECT_FIELDS:
+            p.pop(f, None)
+    return p
+
+
 def hash_pw(pw: str) -> str:
     return bcrypt.hashpw(pw.encode(), bcrypt.gensalt()).decode()
 
@@ -233,6 +245,9 @@ class ProjectIn(BaseModel):
     termin_platnosci_ekipa_dni: int = 21
     vat_tryb: str = "stawka"
     logo_url: Optional[str] = None
+    tryb_rozliczenia: str = "godzinowy"  # akordowy | godzinowy | mieszany
+    stawka_sprzedazy_godz: Optional[float] = None
+    bryg_widzi_stawki: bool = False
 
 
 class MemberIn(BaseModel):
@@ -624,7 +639,7 @@ async def list_projects(status: str = "aktywny", user: dict = Depends(current_us
     for p in projects:
         p = clean(p)
         p["liczba_czlonkow"] = counts.get(p["id"], 0)
-        out.append(p)
+        out.append(strip_project_financials(p, user["rola"]))
     return out
 
 
@@ -653,7 +668,13 @@ async def get_project(project_id: str, user: dict = Depends(current_user)):
                          "rola": u["rola"], "avatar_url": u.get("avatar_url"),
                          "jest_glowny": m.get("jest_glowny", False)})
     p["czlonkowie"] = mout
-    return p
+    # progress: received elements / all elements (Etap 2A)
+    total_el = await db.elements.count_documents({"project_id": project_id, "status": {"$ne": "zarchiwizowany"}})
+    recv_el = await db.elements.count_documents({"project_id": project_id, "status": "odebrany"})
+    folders_n = await db.folders.count_documents({"project_id": project_id, "status": "aktywny"})
+    p["modele_summary"] = {"foldery": folders_n, "elementy": total_el, "odebrane": recv_el,
+                            "procent": round(recv_el / total_el * 100) if total_el else 0}
+    return strip_project_financials(p, user["rola"])
 
 
 @api.put("/projects/{project_id}")
@@ -958,6 +979,18 @@ async def create_report(body: ReportIn, user: dict = Depends(current_user)):
         "zatwierdzil_id": None, "created_at": now_iso(),
     }
     await db.daily_reports.insert_one(doc)
+    # Mark selected elements as "zgłoszony_gotowy" (skip already-received ones).
+    for eid in (body.element_ids or []):
+        el = await db.elements.find_one({"id": eid, "project_id": body.project_id})
+        if not el or el.get("status") == "odebrany":
+            continue
+        await db.elements.update_one({"id": eid}, {"$set": {
+            "status": "zgloszony_gotowy", "zglosil_id": user["id"], "zgloszony_at": now_iso()}})
+        await db.element_history.insert_one({
+            "id": new_id(), "company_id": COMPANY_ID, "element_id": eid,
+            "akcja": "zgloszony_gotowy", "status_przed": el.get("status"),
+            "status_po": "zgloszony_gotowy", "user_id": user["id"],
+            "report_id": doc["id"], "created_at": now_iso()})
     # optional extra hours attached to report
     if body.extra_godziny and body.extra_godziny.get("liczba_godzin"):
         eg = body.extra_godziny
@@ -1368,6 +1401,314 @@ async def register_push(body: RegisterPushIn):
     return {"status": "registered"}
 
 
+# ===========================================================================
+# ETAP 2A — MODELE / ZRZUTY (element types, folders, views, elements, receipts)
+# ===========================================================================
+class ElementTypeIn(BaseModel):
+    nazwa_pl: str
+    nazwa_en: str
+    kolor: str = "#F97316"
+    aktywny: bool = True
+
+
+class FolderIn(BaseModel):
+    nazwa: str
+    opis: Optional[str] = ""
+
+
+class ViewIn(BaseModel):
+    nazwa: str
+    plik_url: str
+    plik_typ: str = "image"  # image | pdf
+    szerokosc: Optional[float] = None
+    wysokosc: Optional[float] = None
+
+
+class ElementIn(BaseModel):
+    kod: str
+    typ_id: Optional[str] = None
+    opis: Optional[str] = ""
+    pozycja_x: float  # 0..1 relative to view
+    pozycja_y: float
+
+
+class ElementUpdateIn(BaseModel):
+    kod: Optional[str] = None
+    typ_id: Optional[str] = None
+    opis: Optional[str] = None
+    pozycja_x: Optional[float] = None
+    pozycja_y: Optional[float] = None
+
+
+class ReceiveIn(BaseModel):
+    element_ids: List[str]
+
+
+class UnreceiveIn(BaseModel):
+    element_ids: List[str]
+    powod: str
+
+
+async def _log_element(element_id: str, akcja: str, before: str, after: str,
+                       user_id: str, report_id: str = None):
+    await db.element_history.insert_one({
+        "id": new_id(), "company_id": COMPANY_ID, "element_id": element_id,
+        "akcja": akcja, "status_przed": before, "status_po": after,
+        "user_id": user_id, "report_id": report_id, "created_at": now_iso()})
+
+
+# ---- Element types (admin dictionary) ----
+@api.get("/element-types")
+async def list_element_types(user: dict = Depends(current_user)):
+    rows = await db.element_types.find({"company_id": COMPANY_ID, "aktywny": True}).to_list(200)
+    return [clean(r) for r in rows]
+
+
+@api.post("/element-types", status_code=201)
+async def create_element_type(body: ElementTypeIn, admin: dict = Depends(require("admin"))):
+    doc = body.model_dump(); doc.update({"id": new_id(), "company_id": COMPANY_ID})
+    await db.element_types.insert_one(doc)
+    await audit(admin["id"], "utworzenie_typu_elementu", "element_type", doc["id"])
+    return clean(doc)
+
+
+@api.put("/element-types/{tid}")
+async def update_element_type(tid: str, body: ElementTypeIn, admin: dict = Depends(require("admin"))):
+    await db.element_types.update_one({"id": tid}, {"$set": body.model_dump()})
+    return clean(await db.element_types.find_one({"id": tid}))
+
+
+@api.delete("/element-types/{tid}")
+async def delete_element_type(tid: str, admin: dict = Depends(require("admin"))):
+    await db.element_types.update_one({"id": tid}, {"$set": {"aktywny": False}})
+    return {"deleted": True}
+
+
+# ---- Folders ----
+async def _folder_stats(fid: str) -> dict:
+    views_n = await db.views.count_documents({"folder_id": fid, "status": "aktywny"})
+    total = await db.elements.count_documents({"folder_id": fid, "status": {"$ne": "zarchiwizowany"}})
+    recv = await db.elements.count_documents({"folder_id": fid, "status": "odebrany"})
+    return {"widoki": views_n, "elementy": total, "odebrane": recv,
+            "procent": round(recv / total * 100) if total else 0}
+
+
+@api.get("/projects/{project_id}/folders")
+async def list_folders(project_id: str, user: dict = Depends(current_user)):
+    rows = await db.folders.find({"project_id": project_id, "status": "aktywny"}).sort("created_at", 1).to_list(500)
+    out = []
+    for f in rows:
+        f = clean(f); f.update(await _folder_stats(f["id"])); out.append(f)
+    return out
+
+
+@api.post("/projects/{project_id}/folders", status_code=201)
+async def create_folder(project_id: str, body: FolderIn, user: dict = Depends(require("admin", "foreman"))):
+    doc = {"id": new_id(), "company_id": COMPANY_ID, "project_id": project_id,
+           "nazwa": body.nazwa, "opis": body.opis, "status": "aktywny", "created_at": now_iso()}
+    await db.folders.insert_one(doc)
+    await audit(user["id"], "utworzenie_folderu", "folder", doc["id"], None, {"nazwa": body.nazwa})
+    return clean(doc)
+
+
+@api.put("/folders/{fid}")
+async def update_folder(fid: str, body: FolderIn, user: dict = Depends(require("admin", "foreman"))):
+    await db.folders.update_one({"id": fid}, {"$set": {"nazwa": body.nazwa, "opis": body.opis}})
+    return clean(await db.folders.find_one({"id": fid}))
+
+
+@api.patch("/folders/{fid}/archive")
+async def archive_folder(fid: str, user: dict = Depends(require("admin", "foreman"))):
+    await db.folders.update_one({"id": fid}, {"$set": {"status": "zarchiwizowany"}})
+    await audit(user["id"], "archiwizacja_folderu", "folder", fid)
+    return {"status": "zarchiwizowany"}
+
+
+# ---- Views ----
+@api.get("/folders/{fid}/views")
+async def list_views(fid: str, user: dict = Depends(current_user)):
+    rows = await db.views.find({"folder_id": fid, "status": "aktywny"}).sort("created_at", 1).to_list(500)
+    out = []
+    for v in rows:
+        v = clean(v)
+        v["elementy"] = await db.elements.count_documents({"view_id": v["id"], "status": {"$ne": "zarchiwizowany"}})
+        v["odebrane"] = await db.elements.count_documents({"view_id": v["id"], "status": "odebrany"})
+        out.append(v)
+    return out
+
+
+@api.post("/folders/{fid}/views", status_code=201)
+async def create_view(fid: str, body: ViewIn, user: dict = Depends(require("admin", "foreman"))):
+    folder = await db.folders.find_one({"id": fid})
+    if not folder:
+        raise HTTPException(404, "Nie znaleziono folderu")
+    doc = {"id": new_id(), "company_id": COMPANY_ID, "folder_id": fid,
+           "project_id": folder["project_id"], "nazwa": body.nazwa, "plik_url": body.plik_url,
+           "plik_typ": body.plik_typ, "szerokosc": body.szerokosc, "wysokosc": body.wysokosc,
+           "status": "aktywny", "created_at": now_iso()}
+    await db.views.insert_one(doc)
+    await audit(user["id"], "utworzenie_widoku", "view", doc["id"], None, {"nazwa": body.nazwa})
+    return clean(doc)
+
+
+@api.put("/views/{vid}")
+async def update_view(vid: str, body: ViewIn, user: dict = Depends(require("admin", "foreman"))):
+    await db.views.update_one({"id": vid}, {"$set": {
+        "nazwa": body.nazwa, "plik_url": body.plik_url, "plik_typ": body.plik_typ}})
+    return clean(await db.views.find_one({"id": vid}))
+
+
+@api.get("/views/{vid}")
+async def get_view(vid: str, user: dict = Depends(current_user)):
+    v = await db.views.find_one({"id": vid})
+    if not v:
+        raise HTTPException(404, "Nie znaleziono widoku")
+    v = clean(v)
+    els = await db.elements.find({"view_id": vid, "status": {"$ne": "zarchiwizowany"}}).to_list(2000)
+    v["elementy"] = [clean(e) for e in els]
+    return v
+
+
+@api.patch("/views/{vid}/archive")
+async def archive_view(vid: str, user: dict = Depends(require("admin", "foreman"))):
+    await db.views.update_one({"id": vid}, {"$set": {"status": "zarchiwizowany"}})
+    await audit(user["id"], "archiwizacja_widoku", "view", vid)
+    return {"status": "zarchiwizowany"}
+
+
+# ---- Elements ----
+@api.get("/views/{vid}/elements")
+async def list_view_elements(vid: str, user: dict = Depends(current_user)):
+    rows = await db.elements.find({"view_id": vid, "status": {"$ne": "zarchiwizowany"}}).to_list(2000)
+    return [clean(r) for r in rows]
+
+
+@api.get("/projects/{project_id}/elements")
+async def list_project_elements(project_id: str, status: Optional[str] = None,
+                                user: dict = Depends(current_user)):
+    q = {"project_id": project_id, "status": {"$ne": "zarchiwizowany"}}
+    if status:
+        q["status"] = status
+    rows = await db.elements.find(q).sort("kod", 1).to_list(3000)
+    return [clean(r) for r in rows]
+
+
+@api.post("/views/{vid}/elements", status_code=201)
+async def create_element(vid: str, body: ElementIn, user: dict = Depends(require("admin", "foreman"))):
+    view = await db.views.find_one({"id": vid})
+    if not view:
+        raise HTTPException(404, "Nie znaleziono widoku")
+    doc = {"id": new_id(), "company_id": COMPANY_ID, "view_id": vid,
+           "folder_id": view["folder_id"], "project_id": view["project_id"],
+           "kod": body.kod, "typ_id": body.typ_id, "opis": body.opis,
+           "pozycja_x": body.pozycja_x, "pozycja_y": body.pozycja_y,
+           "status": "do_wykonania", "zglosil_id": None, "zgloszony_at": None,
+           "odebral_id": None, "odebrany_at": None, "ujete_w_rozliczeniu_id": None,
+           "created_at": now_iso()}
+    await db.elements.insert_one(doc)
+    await _log_element(doc["id"], "utworzony", None, "do_wykonania", user["id"])
+    return clean(doc)
+
+
+@api.put("/elements/{eid}")
+async def update_element(eid: str, body: ElementUpdateIn, user: dict = Depends(require("admin", "foreman"))):
+    el = await db.elements.find_one({"id": eid})
+    if not el:
+        raise HTTPException(404, "Nie znaleziono")
+    upd = {k: v for k, v in body.model_dump().items() if v is not None}
+    if upd:
+        await db.elements.update_one({"id": eid}, {"$set": upd})
+    return clean(await db.elements.find_one({"id": eid}))
+
+
+@api.delete("/elements/{eid}")
+async def delete_element(eid: str, user: dict = Depends(require("admin", "foreman"))):
+    el = await db.elements.find_one({"id": eid})
+    if not el:
+        raise HTTPException(404, "Nie znaleziono")
+    if el.get("status") == "odebrany" or el.get("ujete_w_rozliczeniu_id"):
+        # Protect evidentiary/financial records — archive instead of delete.
+        await db.elements.update_one({"id": eid}, {"$set": {"status": "zarchiwizowany"}})
+        await _log_element(eid, "zarchiwizowany", el.get("status"), "zarchiwizowany", user["id"])
+        return {"archived": True, "message": "Element odebrany — zarchiwizowano zamiast usunięcia."}
+    await db.elements.delete_one({"id": eid})
+    await audit(user["id"], "usuniecie_elementu", "element", eid)
+    return {"deleted": True}
+
+
+@api.get("/elements/{eid}")
+async def get_element(eid: str, user: dict = Depends(current_user)):
+    el = await db.elements.find_one({"id": eid})
+    if not el:
+        raise HTTPException(404, "Nie znaleziono")
+    el = clean(el)
+    hist = await db.element_history.find({"element_id": eid}).sort("created_at", 1).to_list(500)
+    out_hist = []
+    for h in hist:
+        h = clean(h)
+        u = await db.users.find_one({"id": h.get("user_id")})
+        h["kto"] = f"{u['imie']} {u['nazwisko']}" if u else "?"
+        out_hist.append(h)
+    el["historia"] = out_hist
+    if el.get("typ_id"):
+        typ = await db.element_types.find_one({"id": el["typ_id"]})
+        el["typ"] = clean(typ) if typ else None
+    return el
+
+
+# ---- Receipts (odbiory) ----
+@api.get("/projects/{project_id}/elements/pending-receipt")
+async def pending_receipt(project_id: str, user: dict = Depends(require("admin", "foreman"))):
+    rows = await db.elements.find({"project_id": project_id, "status": "zgloszony_gotowy"}).to_list(3000)
+    out = []
+    for e in rows:
+        e = clean(e)
+        v = await db.views.find_one({"id": e["view_id"]})
+        f = await db.folders.find_one({"id": e["folder_id"]})
+        e["widok_nazwa"] = v["nazwa"] if v else "?"
+        e["folder_nazwa"] = f["nazwa"] if f else "?"
+        out.append(e)
+    return out
+
+
+@api.post("/projects/{project_id}/elements/receive")
+async def receive_elements(project_id: str, body: ReceiveIn, user: dict = Depends(require("admin", "foreman"))):
+    n = 0
+    for eid in body.element_ids:
+        el = await db.elements.find_one({"id": eid, "project_id": project_id})
+        if not el or el.get("status") == "odebrany":
+            continue
+        await db.elements.update_one({"id": eid}, {"$set": {
+            "status": "odebrany", "odebral_id": user["id"], "odebrany_at": now_iso()}})
+        await _log_element(eid, "odebrany", el.get("status"), "odebrany", user["id"])
+        if el.get("zglosil_id"):
+            await notify(el["zglosil_id"], "element_odebrany",
+                         f"Element {el['kod']} odebrany.", action_url=f"/element/{eid}", push=False)
+        n += 1
+    await audit(user["id"], "odbior_elementow", "project", project_id, None, {"count": n})
+    return {"odebrano": n}
+
+
+@api.post("/projects/{project_id}/elements/unreceive")
+async def unreceive_elements(project_id: str, body: UnreceiveIn, user: dict = Depends(require("admin", "foreman"))):
+    if not body.powod.strip():
+        raise HTTPException(422, "Powód wymagany / Reason required")
+    n = 0
+    for eid in body.element_ids:
+        el = await db.elements.find_one({"id": eid, "project_id": project_id})
+        if not el or el.get("status") != "odebrany":
+            continue
+        if el.get("ujete_w_rozliczeniu_id"):
+            raise HTTPException(409, f"Element {el['kod']} jest ujęty w rozliczeniu — nie można cofnąć.")
+        await db.elements.update_one({"id": eid}, {"$set": {
+            "status": "zgloszony_gotowy", "odebral_id": None, "odebrany_at": None}})
+        await _log_element(eid, "cofniecie_odbioru", "odebrany", "zgloszony_gotowy", user["id"])
+        n += 1
+    await audit(user["id"], "cofniecie_odbioru", "project", project_id, None, {"count": n, "powod": body.powod})
+    return {"cofnieto": n}
+
+
+
 @api.get("/")
 async def root():
     return {"app": "B-ZONE 2.0", "status": "ok"}
@@ -1401,6 +1742,16 @@ async def startup():
             await db.delay_reasons.insert_one({
                 "id": new_id(), "company_id": COMPANY_ID, "nazwa_pl": pl,
                 "nazwa_en": en, "aktywna": True})
+    if await db.element_types.count_documents({"company_id": COMPANY_ID}) == 0:
+        el_types = [
+            ("Okno", "Window", "#3B82F6"), ("Drzwi", "Door", "#10B981"),
+            ("Płyta elewacyjna", "Facade panel", "#F97316"),
+            ("Narożnik", "Corner", "#A855F7"), ("Parapet", "Windowsill", "#EAB308"),
+        ]
+        for pl, en, kolor in el_types:
+            await db.element_types.insert_one({
+                "id": new_id(), "company_id": COMPANY_ID, "nazwa_pl": pl,
+                "nazwa_en": en, "kolor": kolor, "aktywny": True})
 
 
 @app.on_event("shutdown")

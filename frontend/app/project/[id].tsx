@@ -100,6 +100,25 @@ export default function ProjectDetail() {
               <Row icon="time-outline" label={t("work_hours_label")} value={`${project.godz_od}–${project.godz_do}`} />
               <Row icon="calendar-outline" label={t("deadline")} value={project.termin ? formatDate(project.termin, lang) : "—"} />
             </Card>
+
+            <Pressable testID="models-tile" onPress={() => router.push(`/models/${id}`)} style={styles.modelsTile}>
+              <View style={styles.modelsHead}>
+                <View style={styles.modelsIcon}><Ionicons name="grid-outline" size={20} color={colors.brand} /></View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.modelsTitle}>{t("models")}</Text>
+                  <Text style={styles.modelsMeta}>
+                    {project.modele_summary?.odebrane || 0}/{project.modele_summary?.elementy || 0} · {project.modele_summary?.foldery || 0} {t("folders").toLowerCase()}
+                  </Text>
+                </View>
+                <Text style={styles.modelsPct}>{project.modele_summary?.procent || 0}%</Text>
+              </View>
+              <ProgressBar value={project.modele_summary?.procent || 0} />
+            </Pressable>
+
+            {(user?.rola === "admin" || user?.rola === "foreman") && (
+              <Button testID="open-receipts" title={t("receipts")} icon="checkmark-circle-outline" variant="secondary" onPress={() => router.push(`/receipts/${id}`)} />
+            )}
+
             {user?.rola === "contractor" && (
               <Card style={styles.schedule}>
                 <Ionicons name="calendar-outline" size={18} color={colors.muted} />
