@@ -13,6 +13,7 @@ import { Card } from "@/src/components/Card";
 import { Button } from "@/src/components/Button";
 import { Avatar } from "@/src/components/Avatar";
 import { LoadingState, EmptyState } from "@/src/components/States";
+import { ProgressBar } from "@/src/components/ProgressBar";
 import { SelectSheet } from "@/src/components/SelectSheet";
 import { ConfirmModal } from "@/src/components/ConfirmModal";
 import { useToast } from "@/src/components/Toast";

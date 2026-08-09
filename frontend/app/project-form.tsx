@@ -27,14 +27,26 @@ export default function ProjectForm() {
     nazwa: "", kod: "", klient_nazwa: "", adres: "", waluta: "EUR",
     godz_od: "07:00", godz_do: "15:00", dni_tyg: [1, 2, 3, 4, 5],
     soboty_auto: false, soboty_godziny: 8, termin: "",
+    tryb_rozliczenia: "godzinowy", stawka_sprzedazy_godz: "",
   });
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     if (editing) {
-      api(`/projects/${id}`).then((p) => setForm({ ...form, ...p })).catch(() => {});
+      api(`/projects/${id}`).then((p: any) => setForm({
+        ...form, ...p,
+        stawka_sprzedazy_godz: p.stawka_sprzedazy_godz != null ? String(p.stawka_sprzedazy_godz) : "",
+        tryb_rozliczenia: p.tryb_rozliczenia || "godzinowy",
+      })).catch(() => {});
     }
   }, [id]);
+
+  const BILLING_MODES: { key: string; label: string }[] = [
+    { key: "akordowy", label: t("billing_akordowy") },
+    { key: "godzinowy", label: t("billing_godzinowy") },
+    { key: "mieszany", label: t("billing_mieszany") },
+  ];
+  const needsSellRate = form.tryb_rozliczenia === "godzinowy" || form.tryb_rozliczenia === "mieszany";
 
   const set = (k: string, v: any) => setForm((f: any) => ({ ...f, [k]: v }));
   const toggleDay = (d: number) => {
@@ -45,12 +57,16 @@ export default function ProjectForm() {
 
   const submit = async () => {
     if (!form.nazwa.trim()) { toast.show(t("error_generic"), "error"); return; }
+    const sellRate = parseFloat(String(form.stawka_sprzedazy_godz).replace(",", "."));
+    if (needsSellRate && !(sellRate > 0)) { toast.show(t("sell_rate"), "error"); return; }
     setSaving(true);
     try {
       const body = {
         nazwa: form.nazwa, kod: form.kod, klient_nazwa: form.klient_nazwa, adres: form.adres,
         waluta: form.waluta, godz_od: form.godz_od, godz_do: form.godz_do, dni_tyg: form.dni_tyg,
         soboty_auto: form.soboty_auto, soboty_godziny: Number(form.soboty_godziny) || 0, termin: form.termin || null,
+        tryb_rozliczenia: form.tryb_rozliczenia,
+        stawka_sprzedazy_godz: needsSellRate ? sellRate : null,
       };
       if (editing) await api(`/projects/${id}`, { method: "PUT", body });
       else await api("/projects", { method: "POST", body });
@@ -93,6 +109,22 @@ export default function ProjectForm() {
         {form.soboty_auto && (
           <TextField testID="pf-soboty-godz" label={`${t("saturdays_auto")} - ${t("hours_count")}`} value={String(form.soboty_godziny)} onChangeText={(v) => set("soboty_godziny", v)} keyboardType="decimal-pad" />
         )}
+        <View style={{ gap: spacing.sm }}>
+          <Text style={styles.label}>{t("billing_mode")}</Text>
+          <View style={styles.billing}>
+            {BILLING_MODES.map((m) => {
+              const active = form.tryb_rozliczenia === m.key;
+              return (
+                <Pressable key={m.key} testID={`billing-${m.key}`} onPress={() => set("tryb_rozliczenia", m.key)} style={[styles.billingChip, active && styles.billingChipActive]}>
+                  <Text style={[styles.billingText, active && { color: "#fff" }]}>{m.label}</Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        </View>
+        {needsSellRate && (
+          <TextField testID="pf-sell-rate" label={t("sell_rate")} value={String(form.stawka_sprzedazy_godz)} onChangeText={(v) => set("stawka_sprzedazy_godz", v)} keyboardType="decimal-pad" placeholder="0.00" />
+        )}
       </KeyboardAwareScrollView>
       <KeyboardStickyView offset={{ closed: 0, opened: insets.bottom }}>
         <View style={[styles.footer, { paddingBottom: insets.bottom + spacing.sm }]}>
@@ -111,6 +143,10 @@ const styles = StyleSheet.create({
   day: { width: 42, height: 42, borderRadius: radius.sm, backgroundColor: colors.surfaceSecondary, borderWidth: 1, borderColor: colors.border, alignItems: "center", justifyContent: "center" },
   dayActive: { backgroundColor: colors.brand, borderColor: colors.brand },
   dayText: { color: colors.muted, fontWeight: "700" },
+  billing: { flexDirection: "row", gap: spacing.sm },
+  billingChip: { flex: 1, paddingVertical: spacing.md, borderRadius: radius.sm, backgroundColor: colors.surfaceSecondary, borderWidth: 1, borderColor: colors.border, alignItems: "center" },
+  billingChipActive: { backgroundColor: colors.brand, borderColor: colors.brand },
+  billingText: { color: colors.muted, fontWeight: "700", fontSize: font.base },
   switchRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   footer: { padding: spacing.lg, borderTopWidth: 1, borderTopColor: colors.divider, backgroundColor: colors.surface },
 });

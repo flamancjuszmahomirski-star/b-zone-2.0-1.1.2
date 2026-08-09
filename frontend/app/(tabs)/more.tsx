@@ -27,6 +27,7 @@ export default function More() {
   const adminItems: Item[] = [
     { icon: "business-outline", label: t("projects"), route: "/projects", testID: "more-projects" },
     { icon: "people-outline", label: t("user_management"), route: "/users", testID: "more-users" },
+    { icon: "pricetags-outline", label: t("element_types"), route: "/element-types", testID: "more-element-types" },
     { icon: "list-outline", label: t("audit_log"), route: "/audit", testID: "more-audit" },
     { icon: "archive-outline", label: t("archive_view"), route: "/archive", testID: "more-archive" },
   ];

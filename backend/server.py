@@ -684,7 +684,10 @@ async def update_project(project_id: str, body: ProjectIn, admin: dict = Depends
         raise HTTPException(404, "Nie znaleziono")
     await db.projects.update_one({"id": project_id}, {"$set": body.model_dump()})
     await audit(admin["id"], "edycja_projektu", "project", project_id,
-                {"nazwa": old.get("nazwa")}, {"nazwa": body.nazwa})
+                {"nazwa": old.get("nazwa"), "tryb_rozliczenia": old.get("tryb_rozliczenia"),
+                 "stawka_sprzedazy_godz": old.get("stawka_sprzedazy_godz")},
+                {"nazwa": body.nazwa, "tryb_rozliczenia": body.tryb_rozliczenia,
+                 "stawka_sprzedazy_godz": body.stawka_sprzedazy_godz})
     return clean(await db.projects.find_one({"id": project_id}))
 
 

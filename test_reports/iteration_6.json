@@ -1,0 +1,59 @@
+{
+  "summary": "Etap 2A (Modele/Zrzuty) — backend + frontend integration verified. Backend: 33/33 PASS on new /app/backend/tests/test_etap2a_models.py (1 skip for rozliczenie endpoint not available yet). Regression: 70/70 PASS on backend_test.py + test_p1_p3_features.py + test_etap1_hardening.py. CONTRACTOR SECURITY (hard requirement) VERIFIED: contractor role receives GET /projects and GET /projects/{id} responses with all 5 financial fields stripped (stawka_sprzedazy_godz, bryg_widzi_stawki, termin_platnosci_klient_dni, termin_platnosci_ekipa_dni, vat_tryb) — filter is server-side via strip_project_financials. Element types CRUD guarded by admin (foreman/worker get 403). Folders/views admin+foreman only (worker 403). Elements: no-typ (hourly) create OK, status lifecycle do_wykonania→zgloszony_gotowy (via /reports element_ids)→odebrany (via /receive) confirmed; element_history contains report_id on zgloszony_gotowy entry; odebrany element skipped by second report. DELETE on odebrany returns {archived:true} instead of deleting. /unreceive requires 'powod' (422 on empty). PUT /projects logs edycja_projektu audit with wartosc_po={tryb_rozliczenia,stawka_sprzedazy_godz}. modele_summary.procent computed on GET /projects/{id}. FRONTEND smoke (390x844): login as admin OK, /project/{id} loads WITHOUT crash — ProgressBar import fix verified, models-tile testID present and tappable → /models/{id}. Admin 'Więcej' shows 'Słownik typów' link → /element-types with seeded types (Okno/Drzwi/Płyta elewacyjna/Narożnik/Parapet) and add-type button. project-form: billing chips (akordowy/godzinowy/mieszany) toggle correctly, 'stawka sprzedaży (€/h)' input hidden for akordowy, visible for godzinowy/mieszany. report-new: 'Wykonane elementy (opcjonalne)' section + ElementPicker dropdown present. Deprecated packages detected: none new (only carry-over 'shadow*' and 'props.pointerEvents' web deprecation warnings).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "app/project/[id].tsx — Modele tile",
+        "issue": "The Pressable for 'Modele' tile references 6 style keys (modelsTile, modelsHead, modelsIcon, modelsTitle, modelsMeta, modelsPct) that are NOT defined in the StyleSheet.create() block at the bottom of the file. Visually the tile renders unstyled: title/meta/percent stack vertically without layout, ProgressBar sits below unstyled text. Function works (tap navigates to /models/{id}) but the design is broken. Reference: /app/frontend/app/project/[id].tsx lines 105-117 vs styles block lines 193-209.",
+        "testID": "models-tile",
+        "priority": "MEDIUM"
+      }
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {
+        "screen": "/project/{id} — Przegląd tab",
+        "issues": ["Modele tile is not styled (missing StyleSheet entries — see ui_bugs). No visible card background, no horizontal row layout, no left-icon container, no big percent. Screenshot captured in run."]
+      }
+    ],
+    "react_native_issues": [
+      {"component": "styles", "issue": "'shadow*' style props deprecated on react-native-web — migrate to 'boxShadow'. Non-blocking, carried over from prior iterations."},
+      {"component": "props.pointerEvents", "issue": "props.pointerEvents deprecated — use style.pointerEvents. Reference: /app/frontend/src/components/Toast.tsx and one other component (visible in console). Non-blocking."}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_etap2a_models.py",
+    "/app/backend/tests/backend_test.py",
+    "/app/backend/tests/test_p1_p3_features.py",
+    "/app/backend/tests/test_etap1_hardening.py",
+    "/app/test_reports/pytest/iter6_etap2a.xml",
+    "/app/test_reports/pytest/iter6_regression.xml"
+  ],
+  "action_items": [
+    "Add missing StyleSheet entries in /app/frontend/app/project/[id].tsx for keys: modelsTile, modelsHead, modelsIcon, modelsTitle, modelsMeta, modelsPct. Suggested: modelsTile as Card-like container (padding spacing.lg, radius.md, backgroundColor colors.surfaceSecondary), modelsHead as {flexDirection:'row', alignItems:'center', gap: spacing.md}, modelsIcon as a small badge (w/h 36, brandTertiary bg, borderRadius), modelsTitle bold, modelsMeta muted, modelsPct bold brand color right-aligned. This is the last visual defect from the Etap 2A crash-fix follow-up.",
+    "Optional: implement the 'element ujęty w rozliczeniu' path so the /unreceive 409 test can be un-skipped (test_unreceive_409_when_rozliczenie currently pytest.skip'd because ElementUpdateIn does not allow setting ujete_w_rozliczeniu_id from API — that field is only set by future rozliczenie logic).",
+    "Optional (carried over cosmetic): migrate shadow*/pointerEvents to modern RN-Web equivalents."
+  ],
+  "critical_code_review_comments": [
+    "strip_project_financials is called on both list_projects and get_project. PUT /projects/{id} however returns the raw project without stripping — safe today because endpoint is admin-only, but if role scope ever widens this becomes a leak. Consider always applying strip_project_financials on any project payload to be defensive.",
+    "server.py at 1773 lines — again flagged as candidate for splitting into per-resource routers (element_types/folders/views/elements/receipts could be their own module).",
+    "Missing StyleSheet keys in /app/frontend/app/project/[id].tsx: modelsTile/modelsHead/modelsIcon/modelsTitle/modelsMeta/modelsPct — this file lints clean (no undefined variables) because StyleSheet lookups are runtime `undefined` (RN silently ignores). Consider a Style-typed helper or TS strict mode to catch these.",
+    "Report/element flow correctly skips already-received elements when a new report is created; element_history tracks report_id, so audit trail is preserved."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_etap2a_models.py (NEW — 34 tests, 33 passing / 1 skipped)"
+  ],
+  "success_rate": {
+    "backend": "100% (33/33 Etap 2A + 70/70 regression; 1 planned skip)",
+    "frontend": "95% — all target flows render and navigate; single visual bug: unstyled Modele tile on /project/{id}"
+  },
+  "seed_data_creation": "Module-scoped fixture creates TEST_E2A project + TEST_ foreman/worker/contractor users + element_types with 'TEST_' prefix. All cleaned up in teardown. Seeded admin (admin@bzone.app) untouched.",
+  "retest_needed": true,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Env: export EXPO_PUBLIC_BACKEND_URL=https://app-builder-11766.preview.emergentagent.com before pytest. Run Etap 2A file with: pytest backend/tests/test_etap2a_models.py -o addopts= (needed to disable pytest-xdist parallelism in pytest.ini because module fixture ctx dict is not shared across workers). Admin: admin@bzone.app / Admin12345!. Contractor test uses kontrahent_user_id linkage on the project — same pattern for future contractor-scoped tests.",
+  "rca_of_issue": "Root cause of the Modele-tile visual regression: when main agent added the tile in /app/frontend/app/project/[id].tsx (lines 105-117) referencing styles.modelsTile/modelsHead/modelsIcon/modelsTitle/modelsMeta/modelsPct, the corresponding entries were not added to the StyleSheet.create() call at the bottom of the file (lines 193-209 only contain: screen, tabs, tab, tabActive, tabText, infoRow, infoLabel, infoValue, schedule, scheduleText, memberRow, memberName, memberRole, reportRow, footer). React Native's StyleSheet resolves missing keys as `undefined` at runtime without erroring, so the Pressable + inner Views render without any layout/decoration. Reproduce: login as admin → tap the only project card → Overview tab → observe stacked text under grid icon. Fix: add the 6 style entries as described in action_items[0]."
+}

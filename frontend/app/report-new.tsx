@@ -13,6 +13,7 @@ import { Button } from "@/src/components/Button";
 import { VoiceRecorder } from "@/src/components/VoiceRecorder";
 import { PhotoStrip, Photo } from "@/src/components/PhotoStrip";
 import { SelectField, SelectSheet } from "@/src/components/SelectSheet";
+import { ElementPicker } from "@/src/components/ElementPicker";
 import { useToast } from "@/src/components/Toast";
 import { useDelayReasons } from "@/src/hooks/useDelayReasons";
 
@@ -32,10 +33,15 @@ export default function ReportNew() {
   const [extraDesc, setExtraDesc] = useState("");
   const [projPicker, setProjPicker] = useState(false);
   const [reasonPicker, setReasonPicker] = useState(false);
+  const [elSel, setElSel] = useState<Record<string, boolean>>({});
+  const [elPicker, setElPicker] = useState(false);
   const [saving, setSaving] = useState(false);
 
   const projName = projects.find((p) => p.id === projectId)?.nazwa;
   const reasonLabel = reasons.find((r) => r.id === reasonId)?.[lang === "pl" ? "nazwa_pl" : "nazwa_en"];
+  const elCount = Object.values(elSel).filter(Boolean).length;
+
+  const chooseProject = (pid: string) => { setProjectId(pid); setElSel({}); };
 
   const submit = async () => {
     if (!projectId || !opis.trim()) {
@@ -49,6 +55,7 @@ export default function ReportNew() {
         opis: opis.trim(),
         transkrypcja: opis.trim(),
         zdjecia: photos,
+        element_ids: Object.keys(elSel).filter((k) => elSel[k]),
       };
       if (extraHours && parseFloat(extraHours.replace(",", "."))) {
         body.extra_godziny = {
@@ -104,6 +111,16 @@ export default function ReportNew() {
         </View>
 
         <View style={styles.section}>
+          <Text style={styles.label}>{t("completed_elements")} ({t("optional")})</Text>
+          <SelectField
+            testID="report-elements"
+            value={elCount > 0 ? `${elCount} ${t("st_zgloszony_gotowy").toLowerCase()}` : undefined}
+            placeholder={t("select_elements")}
+            onPress={() => { if (projectId) setElPicker(true); else toast.show(t("select_project"), "info"); }}
+          />
+        </View>
+
+        <View style={styles.section}>
           <Text style={styles.label}>{t("extra_hours")} ({t("optional")})</Text>
           <TextInput
             testID="report-extra-hours"
@@ -146,7 +163,7 @@ export default function ReportNew() {
         title={t("select_project")}
         options={projects.map((p) => ({ value: p.id, label: p.nazwa }))}
         selected={projectId}
-        onSelect={setProjectId}
+        onSelect={chooseProject}
         onClose={() => setProjPicker(false)}
       />
       <SelectSheet
@@ -156,6 +173,14 @@ export default function ReportNew() {
         selected={reasonId}
         onSelect={setReasonId}
         onClose={() => setReasonPicker(false)}
+      />
+
+      <ElementPicker
+        visible={elPicker}
+        projectId={projectId}
+        selected={elSel}
+        onToggle={(id) => setElSel((s) => ({ ...s, [id]: !s[id] }))}
+        onClose={() => setElPicker(false)}
       />
     </View>
   );
