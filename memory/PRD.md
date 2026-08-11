@@ -39,6 +39,17 @@ admin, foreman (brygadzista), subcontractor (podwykonawca), worker (pracownik), 
 - BEZPIECZEŃSTWO: strip_project_financials po stronie backendu — kontrahent NIE widzi stawka_sprzedazy_godz/bryg_widzi_stawki/termin_platnosci_*/vat_tryb (potwierdzone surową odpowiedzią API). Wszystkie tabele mają company_id.
 - Weryfikacja: backend 33/33 test_etap2a_models.py + 70/70 regresja; frontend flow zielony (iteration_6.json). Cache Metro wyczyszczony przed zakończeniem.
 
+## Runda 1 (2026-08-11) — naprawy przed wejściem ekipy (zakres zamknięty)
+- 1.1 Raport: pogoda ograniczona timeoutem (asyncio.wait_for 6s, None gdy błąd) — POST /reports nigdy się nie zawiesza; walidacja frontendu z konkretnymi komunikatami; kompresja zdjęć (expo-image-manipulator 1920px/q0.6) + timeout/retry w uploadFile + komunikaty 413/sieć.
+- 1.2 Unikalność kodów: walidacja create+edit (409), partialny unikalny indeks uniq_element_kod, /validate-codes, /duplicates + ekran /fix-duplicates + banner na models; tryb serii pomija zajęte kody.
+- 2.1 Zgłoszenia: dodawanie dla worker/subcontractor/foreman/admin (FAB + pusty stan), backend 403 dla contractor.
+- 2.2 report/[id]: zgłoszone elementy (klikalne), godziny ekstra (przyczyna/opis/element), klient, Zatwierdź/Odrzuć dla managera, pusty stempel pogody.
+- 3.1 Wyczyszczono WSZYSTKIE dane testowe (0 projektów); zostawiono admina + 3 realne konta (nazwy wyczyszczone). element_types zresetowane do 5 domyślnych.
+- 3.2 Hasło admina rotowane (silne, must_change_password=True), endpoint /auth/change-password + ekran /change-password + wymuszenie przy pierwszym logowaniu.
+- 3.4 Usunięto martwy kafel „Harmonogram wkrótce". 3.5/3.6 StatusBadge i18n (koniec „Rozwiązane/Resolved"). 3.7 project-form: pole Termin + klient.
+- 4. Schemat: elements.geometria_typ='punkt' + geometria_json=null (create + migracja).
+- Weryfikacja: 114/114 backend (11 runda1 + 70 regresja + 33 Etap2A). Cache Metro wyczyszczony.
+
 ## Notes / Not-yet-live
 - Push notifications: structure implemented (register-push + server-side send_push on events). Requires `google-services.json` (Android) + deploy → build to actually deliver; does NOT work in Expo Go.
 - App logo: bison-in-hard-hat placeholder ("BZ"/hammer) — swap in real PNG when provided (icon, splash, login).

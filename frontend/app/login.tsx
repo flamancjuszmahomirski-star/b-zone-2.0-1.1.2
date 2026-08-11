@@ -26,8 +26,9 @@ export default function Login() {
     if (!email || !haslo) return;
     setLoading(true);
     try {
-      await login(email.trim(), haslo);
-      router.replace("/");
+      const u = await login(email.trim(), haslo);
+      if ((u as any)?.must_change_password) router.replace("/change-password");
+      else router.replace("/");
     } catch (e: any) {
       toast.show(e.message || t("error_generic"), "error");
     } finally {

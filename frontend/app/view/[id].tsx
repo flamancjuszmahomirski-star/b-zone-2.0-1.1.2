@@ -68,10 +68,14 @@ export default function ViewCanvas() {
   const addAt = (relX: number, relY: number) => {
     if (mode !== "edit") return;
     if (series) {
-      const code = `${prefix}${nextNum}`;
+      // Series: skip any codes already taken (whole-range guard) before saving.
+      let n = nextNum;
+      const existing = new Set(elements.map((e) => e.kod));
+      while (existing.has(`${prefix}${n}`)) n += 1;
+      const code = `${prefix}${n}`;
       api(`/views/${id}/elements`, { method: "POST", body: { kod: code, typ_id: typId, opis: "", pozycja_x: relX, pozycja_y: relY } })
-        .then((el) => { setElements((p) => [...p, el]); setNextNum((n) => n + 1); })
-        .catch((e) => toast.show(e.message || t("error_generic"), "error"));
+        .then((el) => { setElements((p) => [...p, el]); setNextNum(n + 1); })
+        .catch((e) => toast.show(e?.status === 409 ? t("code_taken") : (e.message || t("error_generic")), "error"));
     } else {
       setPendingPos({ x: relX, y: relY }); setKod("");
     }
@@ -82,7 +86,7 @@ export default function ViewCanvas() {
     try {
       const el = await api(`/views/${id}/elements`, { method: "POST", body: { kod: kod.trim(), typ_id: typId, opis: "", pozycja_x: pendingPos.x, pozycja_y: pendingPos.y } });
       setElements((p) => [...p, el]); setPendingPos(null); setKod(""); toast.show(t("saved"));
-    } catch (e: any) { toast.show(e.message || t("error_generic"), "error"); }
+    } catch (e: any) { toast.show(e?.status === 409 ? t("code_taken") : (e.message || t("error_generic")), "error"); }
   };
 
   const tapGesture = Gesture.Tap().maxDuration(250).onEnd((e) => {

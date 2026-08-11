@@ -15,6 +15,7 @@ export type User = {
   status: string;
   stawka_godz_eur?: number;
   jezyk?: string;
+  must_change_password?: boolean;
 };
 
 type AuthCtx = {

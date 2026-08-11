@@ -50,18 +50,45 @@ export async function api<T = any>(path: string, opts: Opts = {}): Promise<T> {
 }
 
 // Multipart upload (photos / attachments). Returns {id, url, name}.
+// Bounded timeout + one retry on network drop; clear errors for size vs. network.
 export async function uploadFile(
   fileObj: { uri: string; name: string; type: string },
   kind: string
 ): Promise<{ id: string; url: string; name: string }> {
-  const form = new FormData();
-  // @ts-ignore react-native FormData file
-  form.append("file", fileObj as any);
-  form.append("kind", kind);
   const headers = await authHeader();
-  const res = await fetch(`${API}/files`, { method: "POST", headers, body: form });
-  if (!res.ok) throw new Error("Upload failed");
-  return res.json();
+  let lastErr: any;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const form = new FormData();
+    // @ts-ignore react-native FormData file
+    form.append("file", fileObj as any);
+    form.append("kind", kind);
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 60000);
+    try {
+      const res = await fetch(`${API}/files`, { method: "POST", headers, body: form, signal: controller.signal });
+      clearTimeout(timer);
+      if (res.status === 413) {
+        const err: any = new Error("PHOTO_TOO_LARGE");
+        err.code = "PHOTO_TOO_LARGE";
+        throw err;
+      }
+      if (!res.ok) {
+        const err: any = new Error("UPLOAD_FAILED");
+        err.code = "UPLOAD_FAILED";
+        err.status = res.status;
+        throw err;
+      }
+      return res.json();
+    } catch (e: any) {
+      clearTimeout(timer);
+      lastErr = e;
+      if (e.code === "PHOTO_TOO_LARGE") throw e; // don't retry a too-big file
+      if (attempt === 0) await new Promise((r) => setTimeout(r, 800));
+    }
+  }
+  const err: any = lastErr || new Error("UPLOAD_FAILED");
+  if (!err.code) err.code = "UPLOAD_FAILED";
+  throw err;
 }
 
 // Audio transcription. audio: {uri,name,type}. Returns transcript text.

@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, Pressable, ScrollView, Linking, Modal } from "r
 import { Image } from "expo-image";
 import { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
+import * as ImageManipulator from "expo-image-manipulator";
 import * as Location from "expo-location";
 import { colors, spacing, font, radius } from "@/src/theme/tokens";
 import { useI18n } from "@/src/i18n/I18nContext";
@@ -46,16 +47,31 @@ export function PhotoStrip({
     setUploading(true);
     try {
       const gps = await getGps();
-      const name = asset.fileName || `zdjecie_${Date.now()}.jpg`;
+      // Client-side compression BEFORE upload: resize longest side to 1920px, JPEG q0.6.
+      // Cuts a 4000px phone photo by ~75% so uploads don't hit size/timeout limits.
+      let uri = asset.uri;
+      try {
+        const manip = await ImageManipulator.manipulateAsync(
+          asset.uri,
+          [{ resize: { width: (asset.width || 4000) >= (asset.height || 3000) ? 1920 : undefined,
+                       height: (asset.height || 3000) > (asset.width || 4000) ? 1920 : undefined } }],
+          { compress: 0.6, format: ImageManipulator.SaveFormat.JPEG }
+        );
+        uri = manip.uri;
+      } catch {
+        // If manipulation fails (rare), fall back to the original picked (already q0.6).
+      }
+      const name = `zdjecie_${Date.now()}.jpg`;
       const fileObj: any =
         typeof window !== "undefined" && (asset as any).file
           ? (asset as any).file
-          : { uri: asset.uri, name, type: asset.mimeType || "image/jpeg" };
+          : { uri, name, type: "image/jpeg" };
       const up = await uploadFile(fileObj, "report_photo");
       onChange([...photos, { file_id: up.id, url: up.url, timestamp: new Date().toISOString(), gps }]);
       toast.show(t("saved"));
-    } catch {
-      toast.show(t("error_generic"), "error");
+    } catch (e: any) {
+      if (e?.code === "PHOTO_TOO_LARGE") toast.show(t("photo_too_large"), "error");
+      else toast.show(t("upload_failed_retry"), "error");
     } finally {
       setUploading(false);
     }
@@ -109,7 +125,7 @@ export function PhotoStrip({
         ))}
         <Pressable testID="add-photo-btn" onPress={() => setPicker(true)} style={styles.addBtn} disabled={uploading}>
           <Ionicons name={uploading ? "hourglass" : "camera"} size={26} color={colors.brand} />
-          <Text style={styles.addText}>{t("add_photo")}</Text>
+          <Text style={styles.addText} numberOfLines={2}>{uploading ? t("uploading_photo") : t("add_photo")}</Text>
         </Pressable>
       </ScrollView>
 

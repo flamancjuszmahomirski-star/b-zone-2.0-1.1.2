@@ -1,0 +1,47 @@
+{
+  "summary": "RUNDA 1 (pre-crew fixes) — 11/11 new backend tests PASS on /app/backend/tests/test_runda1_fixes.py + 70/70 regression on backend_test.py + test_p1_p3_features.py + test_etap1_hardening.py + 33/33+1skip on test_etap2a_models.py. Frontend spot-checks (390x844, admin@bzone.app / Admin12345!) confirm: (a) /issue-new empty submit → toast 'Najpierw wybierz projekt' (project not yet loaded case) and separately 'Tytuł jest wymagany' / 'Opis jest wymagany' when project is set — validation strings are the exact PL copy required by task 1.1, NOT 'Coś poszło nie tak'. (b) /report-new empty submit → same PL toast pattern. (c) /change-password renders cp-old + cp-new + cp-repeat + cp-submit, submit with pw <8 chars shows 'Hasło musi mieć min. 8 znaków'. (d) Issues tab shows FAB (data-testid=fab-new-issue) for admin, StatusBadge renders translated PL 'Otwarte' (not raw i18n key). Backend covers: POST /reports fast (<10s wall time) with empty adres → pogoda_json=null and 201; enriched GET /reports/{id} returns klient_nazwa + elementy[{kod,status}] + extra_godziny[{liczba_godzin,przyczyna_pl,przyczyna_en,element_kod}]; POST /views/{vid}/elements 409 on duplicate code, PUT /elements/{eid} 409 on rename to taken code, /validate-codes returns {taken,ok} and detects duplicates within the batch itself, /duplicates lists groups (correctly empty after uniqueness prevented insert); POST /issues → 403 for contractor, 201 for worker; POST /auth/change-password validates min 8 (422), wrong current (401), correct rotation (200) and old password stops working; new elements default geometria_typ='punkt'/geometria_json=null; contractor GET /projects/{id} has all 5 financial fields stripped (stawka_sprzedazy_godz, bryg_widzi_stawki, termin_platnosci_klient_dni, termin_platnosci_ekipa_dni, vat_tryb) while admin sees them. MongoDB partial-unique index uniq_element_kod present with partialFilterExpression status ∈ {do_wykonania,zgloszony_gotowy,odebrany} — verified against live DB. Deprecated packages / RN warnings detected: 'shadow*' style deprecation and props.pointerEvents deprecation — carry-over from previous iterations, non-blocking.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": [
+      {"component": "styles (multiple)", "issue": "'shadow*' style props deprecated on react-native-web — migrate to 'boxShadow'. Non-blocking, carried over from earlier iterations."},
+      {"component": "props.pointerEvents", "issue": "props.pointerEvents deprecated — should use style.pointerEvents. Console warning on load. Non-blocking."}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_runda1_fixes.py",
+    "/app/test_reports/pytest/iter7_runda1.xml",
+    "/app/test_reports/pytest/iter7_regression.xml"
+  ],
+  "action_items": [
+    "(Cosmetic, carry-over) Migrate shadow* style props to boxShadow (react-native-web deprecation warning).",
+    "(Cosmetic, carry-over) Migrate props.pointerEvents → style.pointerEvents.",
+    "(Optional/tech-debt from iter_6, still open) Add missing StyleSheet entries for the 'Modele' tile in /app/frontend/app/project/[id].tsx (modelsTile/modelsHead/modelsIcon/modelsTitle/modelsMeta/modelsPct) if not already done.",
+    "(Optional) server.py is at 1897 lines — still a candidate to split into per-resource routers (elements/folders/views/reports)."
+  ],
+  "critical_code_review_comments": [
+    "POST /reports weather is properly bounded by asyncio.wait_for(..., timeout=6.0) and the except catches both TimeoutError and generic Exception → weather=None fallback works and does not block the response. Confirmed by wall-clock timing (<10s) with empty adres. Good defensive pattern.",
+    "Element uniqueness is enforced both at application-layer (409 in create_element/update_element) AND at the Mongo partial-unique index level (uniq_element_kod). Two-tier defense is correct: index survives races that the app-level check might miss.",
+    "GET /reports/{id} now enriches with klient_nazwa/elementy/extra_godziny by doing N+1 lookups per element and per extra hour row. For reports with many elements/extras this could be N queries — acceptable for typical daily reports (<20 elements) but consider $lookup aggregation if reports grow. Not a blocker.",
+    "POST /issues explicitly returns 403 when user['rola']=='contractor' BEFORE any DB work. Clean short-circuit. However the endpoint uses generic current_user dep — a contractor could still receive 401 vs 403 based on token expiration; that's OK. Verified 403 in test.",
+    "POST /auth/change-password uses must_change_password to skip old-password verification, which matches product intent for forced-rotation. Old password re-login is correctly rejected (verified in test).",
+    "strip_project_financials is applied on list_projects + get_project but NOT on PUT /projects/{id} responses. PUT is admin-only today so no leak, but defensive uniformity would prevent future regressions if scope widens. (Same note as iter_6.)"
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_runda1_fixes.py (NEW — 11 tests, all passing)"
+  ],
+  "success_rate": {
+    "backend": "100% (11/11 Runda 1 + 70/70 regression + 33/33+1skip Etap 2A)",
+    "frontend": "100% — all validation strings match PL copy, all target testIDs present, no red screen, no missing screens"
+  },
+  "seed_data_creation": "Module-scoped fixture creates TEST_R1_* project + TEST_ worker/contractor + folder+view+elements. Fixture teardown deletes users; project delete is auto-archived by app (protected because it has reports/hours). Manual cleanup performed at end of run — no test residue left in DB.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Env: export EXPO_PUBLIC_BACKEND_URL=https://app-builder-11766.preview.emergentagent.com. Run Runda 1 with: pytest backend/tests/test_runda1_fixes.py -o addopts= (disable xdist so module ctx fixture is shared). Admin (temp): admin@bzone.app / Admin12345! (must_change_password=False in Runda 1). If admin creds change to must_change_password=True again, tests that log in as admin will need a bootstrap: call POST /auth/change-password with just {'nowe':'<new>'} once, then update ADMIN_PASSWORD accordingly. Element create needs pozycja_x/pozycja_y (required floats) and the view must be created with plik_url + plik_typ. DELETE /projects returns {archived:true} when project has children (reports/hours) — cleanup should tolerate that response. Frontend testIDs verified: submit-issue, submit-report, fab-new-issue, empty-new-issue, cp-old/cp-new/cp-repeat/cp-submit, dup-<id>, rename-<id>, dup-new-kod, dup-save.",
+  "rca_of_issue": "No open defects from this iteration. All Runda 1 changes verified end-to-end (backend contract + frontend validation copy + i18n status badges + change-password flow + contractor security). Only leftover items are cosmetic RN-web deprecation warnings and the still-open (iter_6) missing StyleSheet keys for the Modele tile."
+}

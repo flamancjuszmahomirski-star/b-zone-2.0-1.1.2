@@ -10,6 +10,7 @@ import { useProjects } from "@/src/context/ProjectContext";
 import { api } from "@/src/api/client";
 import { AppBar } from "@/src/components/AppBar";
 import { Card } from "@/src/components/Card";
+import { Button } from "@/src/components/Button";
 import { StatusBadge } from "@/src/components/StatusBadge";
 import { EmptyState, LoadingState, ErrorState } from "@/src/components/States";
 import { formatDate } from "@/src/utils/format";
@@ -24,7 +25,7 @@ export default function Issues() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const role = user?.rola;
-  const canCreate = role === "worker" || role === "subcontractor";
+  const canCreate = role !== "contractor" && !!role;
 
   const [items, setItems] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -67,7 +68,14 @@ export default function Issues() {
       ) : error ? (
         <ErrorState message={t("error_network")} onRetry={load} retryLabel={t("retry")} />
       ) : items.length === 0 ? (
-        <EmptyState icon="alert-circle-outline" message={t("empty_issues")} testID="issues-empty" />
+        <View style={{ flex: 1 }}>
+          <EmptyState icon="alert-circle-outline" message={t("empty_issues")} testID="issues-empty" />
+          {canCreate && (
+            <View style={{ paddingHorizontal: spacing.xl }}>
+              <Button testID="empty-new-issue" title={t("add_issue")} icon="add" onPress={() => router.push("/issue-new")} />
+            </View>
+          )}
+        </View>
       ) : (
         <FlatList
           data={items}

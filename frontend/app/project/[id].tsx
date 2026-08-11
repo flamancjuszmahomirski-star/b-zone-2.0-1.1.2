@@ -119,13 +119,6 @@ export default function ProjectDetail() {
             {(user?.rola === "admin" || user?.rola === "foreman") && (
               <Button testID="open-receipts" title={t("receipts")} icon="checkmark-circle-outline" variant="secondary" onPress={() => router.push(`/receipts/${id}`)} />
             )}
-
-            {user?.rola === "contractor" && (
-              <Card style={styles.schedule}>
-                <Ionicons name="calendar-outline" size={18} color={colors.muted} />
-                <Text style={styles.scheduleText}>{t("schedule_soon")}</Text>
-              </Card>
-            )}
           </>
         )}
 

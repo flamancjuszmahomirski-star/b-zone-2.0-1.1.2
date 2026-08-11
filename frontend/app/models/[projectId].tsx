@@ -26,15 +26,22 @@ export default function Models() {
   const canEdit = user?.rola === "admin" || user?.rola === "foreman";
 
   const [folders, setFolders] = useState<any[]>([]);
+  const [dups, setDups] = useState(0);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
   const [name, setName] = useState("");
 
   const load = useCallback(async () => {
-    try { setFolders(await api<any[]>(`/projects/${projectId}/folders`)); }
+    try {
+      setFolders(await api<any[]>(`/projects/${projectId}/folders`));
+      if (canEdit) {
+        try { const d = await api<any[]>(`/projects/${projectId}/elements/duplicates`); setDups(d.length); }
+        catch { setDups(0); }
+      }
+    }
     catch { setFolders([]); } finally { setLoading(false); }
-  }, [projectId]);
+  }, [projectId, canEdit]);
   useFocusEffect(useCallback(() => { setLoading(true); load(); }, [load]));
   const onRefresh = async () => { setRefreshing(true); await load(); setRefreshing(false); };
 
@@ -63,6 +70,13 @@ export default function Models() {
           keyExtractor={(i) => i.id}
           contentContainerStyle={{ padding: spacing.lg, gap: spacing.md, paddingBottom: insets.bottom + spacing.xxl }}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.brand} />}
+          ListHeaderComponent={canEdit && dups > 0 ? (
+            <Pressable testID="dups-banner" onPress={() => router.push(`/fix-duplicates/${projectId}`)} style={styles.dupsBanner}>
+              <Ionicons name="warning" size={18} color={colors.error} />
+              <Text style={styles.dupsText}>{t("duplicates_found")} ({dups})</Text>
+              <Ionicons name="chevron-forward" size={16} color={colors.error} />
+            </Pressable>
+          ) : null}
           renderItem={({ item }) => (
             <Card testID={`folder-${item.id}`} onPress={() => router.push(`/folder/${item.id}`)} style={styles.card}>
               <View style={styles.row}>
@@ -106,4 +120,6 @@ const styles = StyleSheet.create({
   backdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.6)", justifyContent: "center", padding: spacing.xl },
   sheet: { backgroundColor: colors.surfaceTertiary, borderRadius: radius.lg, padding: spacing.xl, gap: spacing.lg },
   sheetTitle: { color: colors.onSurface, fontSize: font.xl, fontWeight: "800" },
+  dupsBanner: { flexDirection: "row", alignItems: "center", gap: spacing.sm, marginBottom: spacing.md, padding: spacing.md, borderRadius: radius.md, backgroundColor: colors.error + "18", borderWidth: 1, borderColor: colors.error + "55" },
+  dupsText: { color: colors.error, fontSize: font.base, fontWeight: "700", flex: 1 },
 });

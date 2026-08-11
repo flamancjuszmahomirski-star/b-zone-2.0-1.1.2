@@ -4,7 +4,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Image } from "expo-image";
 import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter, useFocusEffect } from "expo-router";
-import { colors, spacing, font, radius } from "@/src/theme/tokens";
+import { colors, spacing, font, radius, elementStatusColor } from "@/src/theme/tokens";
 import { useI18n } from "@/src/i18n/I18nContext";
 import { useAuth } from "@/src/context/AuthContext";
 import { api, fileUrl } from "@/src/api/client";
@@ -99,12 +99,53 @@ export default function ReportDetail() {
           </View>
         )}
 
-        {report.pogoda_json && (
+        {report.elementy?.length > 0 && (
+          <View style={{ gap: spacing.sm }}>
+            <Text style={styles.sectionTitle}>{t("reported_elements")}</Text>
+            <View style={styles.chips}>
+              {report.elementy.map((el: any) => (
+                <Pressable key={el.id} testID={`report-el-${el.id}`} onPress={() => router.push(`/element/${el.id}`)} style={styles.chip}>
+                  <View style={[styles.chipDot, { backgroundColor: elementStatusColor(el.status) }]} />
+                  <Text style={styles.chipText}>{el.kod}</Text>
+                  <Ionicons name="chevron-forward" size={14} color={colors.muted} />
+                </Pressable>
+              ))}
+            </View>
+          </View>
+        )}
+
+        {report.extra_godziny?.length > 0 && (
+          <View style={{ gap: spacing.sm }}>
+            <Text style={styles.sectionTitle}>{t("extra_hours")}</Text>
+            {report.extra_godziny.map((e: any, i: number) => (
+              <Card key={i} style={{ gap: 4 }}>
+                <Text style={styles.exHours}>{e.liczba_godzin} h</Text>
+                {(e.przyczyna_pl || e.przyczyna_en) ? (
+                  <Text style={styles.exMeta}>{lang === "pl" ? e.przyczyna_pl : e.przyczyna_en}</Text>
+                ) : null}
+                {e.opis ? <Text style={styles.exDesc}>{e.opis}</Text> : null}
+                {e.element_kod ? <Text style={styles.exMeta}>{t("linked_element")}: {e.element_kod}</Text> : null}
+              </Card>
+            ))}
+          </View>
+        )}
+
+        {report.pogoda_json ? (
           <Card style={styles.weather}>
             <Ionicons name="partly-sunny-outline" size={20} color={colors.info} />
-            <Text style={styles.weatherText}>
-              {t("weather_stamp")}: {report.pogoda_json.temp}°C · {report.pogoda_json.wiatr} m/s · {report.pogoda_json.opady} mm
-            </Text>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.weatherText}>
+                {t("weather_stamp")}: {report.pogoda_json.temp}°C · {report.pogoda_json.wiatr} m/s · {report.pogoda_json.opady} mm
+              </Text>
+              {report.pogoda_json.miejsce ? (
+                <Text style={styles.weatherLoc}>{t("location")}: {report.pogoda_json.miejsce}</Text>
+              ) : null}
+            </View>
+          </Card>
+        ) : (
+          <Card style={styles.weather}>
+            <Ionicons name="cloud-offline-outline" size={20} color={colors.muted} />
+            <Text style={styles.weatherText}>{t("no_weather_data")}</Text>
           </Card>
         )}
       </ScrollView>
@@ -170,6 +211,14 @@ const styles = StyleSheet.create({
   photo: { width: 120, height: 120, borderRadius: radius.md, backgroundColor: colors.surfaceTertiary },
   weather: { flexDirection: "row", alignItems: "center", gap: spacing.sm, backgroundColor: colors.info + "12", borderColor: colors.info + "44" },
   weatherText: { color: colors.onSurfaceSecondary, fontSize: font.base, flex: 1 },
+  weatherLoc: { color: colors.muted, fontSize: font.sm, marginTop: 2 },
+  chips: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm },
+  chip: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: spacing.md, paddingVertical: spacing.sm, borderRadius: radius.pill, backgroundColor: colors.surfaceSecondary, borderWidth: 1, borderColor: colors.border },
+  chipDot: { width: 10, height: 10, borderRadius: 5 },
+  chipText: { color: colors.onSurface, fontSize: font.base, fontWeight: "700" },
+  exHours: { color: colors.brand, fontSize: font.lg, fontWeight: "800" },
+  exMeta: { color: colors.muted, fontSize: font.sm },
+  exDesc: { color: colors.onSurfaceSecondary, fontSize: font.base },
   rejectLabel: { color: colors.error, fontSize: font.sm, fontWeight: "700", marginBottom: 4 },
   rejectText: { color: colors.onSurface, fontSize: font.base },
   footer: { flexDirection: "row", gap: spacing.md, padding: spacing.lg, borderTopWidth: 1, borderTopColor: colors.divider, backgroundColor: colors.surface },

@@ -38,7 +38,9 @@ export default function IssueNew() {
   ];
 
   const submit = async () => {
-    if (!projectId || !tytul.trim() || !opis.trim()) { toast.show(t("error_generic"), "error"); return; }
+    if (!projectId) { toast.show(t("select_project_first"), "error"); return; }
+    if (!tytul.trim()) { toast.show(t("title_required"), "error"); return; }
+    if (!opis.trim()) { toast.show(t("description_required"), "error"); return; }
     setSaving(true);
     try {
       await api("/issues", { method: "POST", body: { project_id: projectId, tytul: tytul.trim(), opis: opis.trim(), priorytet, zdjecia: photos } });

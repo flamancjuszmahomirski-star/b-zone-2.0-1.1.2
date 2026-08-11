@@ -85,6 +85,7 @@ export default function ProjectForm() {
         <TextField testID="pf-kod" label={t("project_code")} value={form.kod} onChangeText={(v) => set("kod", v)} />
         <TextField testID="pf-klient" label={t("client_name")} value={form.klient_nazwa} onChangeText={(v) => set("klient_nazwa", v)} />
         <TextField testID="pf-adres" label={t("address")} value={form.adres} onChangeText={(v) => set("adres", v)} hint="np. Berlin, Germany" />
+        <TextField testID="pf-termin" label={t("deadline")} value={form.termin || ""} onChangeText={(v) => set("termin", v)} placeholder="2026-12-31" hint={t("deadline_hint")} />
         <View style={styles.timeRow}>
           <View style={{ flex: 1 }}><TextField testID="pf-godzod" label={`${t("work_hours_label")} od`} value={form.godz_od} onChangeText={(v) => set("godz_od", v)} placeholder="07:00" /></View>
           <View style={{ flex: 1 }}><TextField testID="pf-godzdo" label="do" value={form.godz_do} onChangeText={(v) => set("godz_do", v)} placeholder="15:00" /></View>

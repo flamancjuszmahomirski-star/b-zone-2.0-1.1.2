@@ -44,10 +44,8 @@ export default function ReportNew() {
   const chooseProject = (pid: string) => { setProjectId(pid); setElSel({}); };
 
   const submit = async () => {
-    if (!projectId || !opis.trim()) {
-      toast.show(t("error_generic"), "error");
-      return;
-    }
+    if (!projectId) { toast.show(t("select_project_first"), "error"); return; }
+    if (!opis.trim()) { toast.show(t("description_required"), "error"); return; }
     setSaving(true);
     try {
       const body: any = {

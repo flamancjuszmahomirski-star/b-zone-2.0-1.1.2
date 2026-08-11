@@ -6,6 +6,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter, useFocusEffect } from "expo-router";
 import { colors, spacing, font, radius } from "@/src/theme/tokens";
 import { useI18n } from "@/src/i18n/I18nContext";
+import { translations } from "@/src/i18n/translations";
 import { useAuth } from "@/src/context/AuthContext";
 import { api, fileUrl } from "@/src/api/client";
 import { Header } from "@/src/components/Screen";
@@ -43,9 +44,9 @@ export default function IssueDetail() {
   useFocusEffect(useCallback(() => { setLoading(true); load(); }, [load]));
 
   const statuses = [
-    { value: "w_trakcie", label: "W trakcie / In progress" },
-    { value: "rozwiazane", label: "Rozwiązane / Resolved" },
-    { value: "odrzucone", label: "Odrzucone / Rejected" },
+    { value: "w_trakcie", label: t("st_w_trakcie") },
+    { value: "rozwiazane", label: t("st_rozwiazane") },
+    { value: "odrzucone", label: t("st_odrzucone") },
   ];
 
   const applyStatus = async (status: string, reason?: string) => {
@@ -92,7 +93,7 @@ export default function IssueDetail() {
           <View key={i} style={styles.histRow}>
             <View style={styles.histDot} />
             <View style={{ flex: 1 }}>
-              <Text style={styles.histStatus}>{h.status}</Text>
+              <Text style={styles.histStatus}>{(translations.pl as any)[`st_${h.status}`] ? t(`st_${h.status}` as any) : h.status}</Text>
               {h.powod ? <Text style={styles.histReason}>{h.powod}</Text> : null}
               <Text style={styles.histTime}>{formatDateTime(h.kiedy, lang)}</Text>
             </View>

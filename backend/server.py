@@ -10,6 +10,7 @@ Conventions:
 
 import os
 import uuid
+import asyncio
 import logging
 import tempfile
 import mimetypes
@@ -480,6 +481,25 @@ async def login(body: LoginIn):
 async def me(user: dict = Depends(current_user)):
     user.pop("hash", None)
     return user
+
+
+class ChangePasswordIn(BaseModel):
+    stare: Optional[str] = None
+    nowe: str
+
+
+@api.post("/auth/change-password")
+async def change_password(body: ChangePasswordIn, user: dict = Depends(current_user)):
+    if len(body.nowe) < 8:
+        raise HTTPException(422, "Hasło musi mieć min. 8 znaków / Password min 8 chars")
+    # If the account is not in a forced-change state, verify the current password.
+    if not user.get("must_change_password"):
+        if not body.stare or not verify_pw(body.stare, user.get("hash", "")):
+            raise HTTPException(401, "Błędne obecne hasło / Wrong current password")
+    await db.users.update_one({"id": user["id"]}, {"$set": {
+        "hash": hash_pw(body.nowe), "must_change_password": False}})
+    await audit(user["id"], "zmiana_hasla", "user", user["id"])
+    return {"changed": True}
 
 
 @api.put("/auth/me")
@@ -972,7 +992,12 @@ async def create_report(body: ReportIn, user: dict = Depends(current_user)):
     if not project:
         raise HTTPException(404, "Nie znaleziono projektu")
     day = body.data or datetime.now(timezone.utc).date().isoformat()
-    weather = await fetch_weather(project.get("adres", ""))
+    # Weather is best-effort and must NEVER block report submission. Bound it hard.
+    try:
+        weather = await asyncio.wait_for(fetch_weather(project.get("adres", "")), timeout=6.0)
+    except (asyncio.TimeoutError, Exception) as e:
+        logger.warning(f"weather skipped for report: {e}")
+        weather = None
     doc = {
         "id": new_id(), "company_id": COMPANY_ID, "user_id": user["id"],
         "project_id": body.project_id, "data": day, "opis": body.opis,
@@ -1001,8 +1026,8 @@ async def create_report(body: ReportIn, user: dict = Depends(current_user)):
             "id": new_id(), "company_id": COMPANY_ID, "user_id": user["id"],
             "project_id": body.project_id, "data": day,
             "liczba_godzin": float(eg.get("liczba_godzin")),
-            "przyczyna_id": eg.get("przyczyna_id"), "element_id": None,
-            "opis": eg.get("opis", ""), "status": "naliczone",
+            "przyczyna_id": eg.get("przyczyna_id"), "element_id": eg.get("element_id"),
+            "opis": eg.get("opis", ""), "status": "naliczone", "report_id": doc["id"],
             "zatwierdzil_id": None, "ujete_w_rozliczeniu_id": None, "created_at": now_iso(),
         })
     await audit(user["id"], "utworzenie_raportu", "daily_report", doc["id"])
@@ -1058,6 +1083,28 @@ async def get_report(report_id: str, user: dict = Depends(current_user)):
     r["autor"] = f"{u['imie']} {u['nazwisko']}" if u else "?"
     r["autor_avatar"] = u.get("avatar_url") if u else None
     r["project_nazwa"] = p["nazwa"] if p else "?"
+    r["klient_nazwa"] = p.get("klient_nazwa") if p else None
+    # reported elements (clickable on client)
+    els = []
+    for eid in (r.get("element_ids") or []):
+        el = await db.elements.find_one({"id": eid})
+        if el:
+            els.append({"id": el["id"], "kod": el.get("kod"), "status": el.get("status")})
+    r["elementy"] = els
+    # extra hours linked to this report
+    extras = await db.extra_hours.find({"report_id": report_id}).to_list(100)
+    eout = []
+    for e in extras:
+        e = clean(e)
+        if e.get("przyczyna_id"):
+            pr = await db.delay_reasons.find_one({"id": e["przyczyna_id"]})
+            e["przyczyna_pl"] = pr.get("nazwa_pl") if pr else None
+            e["przyczyna_en"] = pr.get("nazwa_en") if pr else None
+        if e.get("element_id"):
+            elx = await db.elements.find_one({"id": e["element_id"]})
+            e["element_kod"] = elx.get("kod") if elx else None
+        eout.append(e)
+    r["extra_godziny"] = eout
     return r
 
 
@@ -1114,6 +1161,8 @@ async def delete_report(report_id: str, user: dict = Depends(current_user)):
 # ===========================================================================
 @api.post("/issues", status_code=201)
 async def create_issue(body: IssueIn, user: dict = Depends(current_user)):
+    if user["rola"] == "contractor":
+        raise HTTPException(403, "Brak uprawnień / Not allowed")
     doc = {
         "id": new_id(), "company_id": COMPANY_ID, "user_id": user["id"],
         "project_id": body.project_id, "tytul": body.tytul, "opis": body.opis,
@@ -1601,16 +1650,47 @@ async def create_element(vid: str, body: ElementIn, user: dict = Depends(require
     view = await db.views.find_one({"id": vid})
     if not view:
         raise HTTPException(404, "Nie znaleziono widoku")
+    kod = (body.kod or "").strip()
+    if not kod:
+        raise HTTPException(422, "Kod jest wymagany / Code required")
+    dup = await db.elements.find_one({"project_id": view["project_id"], "kod": kod,
+                                      "status": {"$ne": "zarchiwizowany"}})
+    if dup:
+        raise HTTPException(409, f"Kod '{kod}' jest już użyty w tym projekcie / Code already used")
     doc = {"id": new_id(), "company_id": COMPANY_ID, "view_id": vid,
            "folder_id": view["folder_id"], "project_id": view["project_id"],
-           "kod": body.kod, "typ_id": body.typ_id, "opis": body.opis,
+           "kod": kod, "typ_id": body.typ_id, "opis": body.opis,
            "pozycja_x": body.pozycja_x, "pozycja_y": body.pozycja_y,
            "status": "do_wykonania", "zglosil_id": None, "zgloszony_at": None,
            "odebral_id": None, "odebrany_at": None, "ujete_w_rozliczeniu_id": None,
+           "geometria_typ": "punkt", "geometria_json": None,
            "created_at": now_iso()}
     await db.elements.insert_one(doc)
     await _log_element(doc["id"], "utworzony", None, "do_wykonania", user["id"])
     return clean(doc)
+
+
+class SeriesValidateIn(BaseModel):
+    kody: List[str]
+
+
+@api.post("/projects/{project_id}/elements/validate-codes")
+async def validate_codes(project_id: str, body: SeriesValidateIn,
+                         user: dict = Depends(require("admin", "foreman"))):
+    """Pre-check a whole series/range of codes before placement (1.2)."""
+    taken = []
+    seen = set()
+    for k in body.kody:
+        k = (k or "").strip()
+        if k in seen:
+            taken.append(k)  # duplicate within the batch itself
+            continue
+        seen.add(k)
+        ex = await db.elements.find_one({"project_id": project_id, "kod": k,
+                                         "status": {"$ne": "zarchiwizowany"}})
+        if ex:
+            taken.append(k)
+    return {"taken": taken, "ok": len(taken) == 0}
 
 
 @api.put("/elements/{eid}")
@@ -1619,9 +1699,36 @@ async def update_element(eid: str, body: ElementUpdateIn, user: dict = Depends(r
     if not el:
         raise HTTPException(404, "Nie znaleziono")
     upd = {k: v for k, v in body.model_dump().items() if v is not None}
+    if "kod" in upd:
+        upd["kod"] = upd["kod"].strip()
+        dup = await db.elements.find_one({"project_id": el["project_id"], "kod": upd["kod"],
+                                          "status": {"$ne": "zarchiwizowany"}, "id": {"$ne": eid}})
+        if dup:
+            raise HTTPException(409, f"Kod '{upd['kod']}' jest już użyty w tym projekcie / Code already used")
     if upd:
         await db.elements.update_one({"id": eid}, {"$set": upd})
     return clean(await db.elements.find_one({"id": eid}))
+
+
+@api.get("/projects/{project_id}/elements/duplicates")
+async def element_duplicates(project_id: str, user: dict = Depends(require("admin", "foreman"))):
+    """Groups of active elements that share the same code (1.2 repair screen)."""
+    pipe = [
+        {"$match": {"project_id": project_id, "status": {"$ne": "zarchiwizowany"}}},
+        {"$group": {"_id": "$kod", "n": {"$sum": 1}, "ids": {"$push": "$id"}}},
+        {"$match": {"n": {"$gt": 1}}},
+    ]
+    groups = []
+    async for g in db.elements.aggregate(pipe):
+        els = []
+        for eid in g["ids"]:
+            el = await db.elements.find_one({"id": eid})
+            if el:
+                v = await db.views.find_one({"id": el["view_id"]})
+                els.append({"id": el["id"], "kod": el["kod"], "status": el["status"],
+                            "widok_nazwa": v["nazwa"] if v else "?"})
+        groups.append({"kod": g["_id"], "count": g["n"], "elementy": els})
+    return groups
 
 
 @api.delete("/elements/{eid}")
@@ -1724,6 +1831,22 @@ async def root():
 async def startup():
     await db.users.create_index("email", unique=True)
     await db.users.create_index("id", unique=True)
+    # Unique element code per project (1.2). Partial index over active elements only,
+    # so archived duplicates never block re-use of a freed code.
+    try:
+        await db.elements.create_index(
+            [("company_id", 1), ("project_id", 1), ("kod", 1)],
+            unique=True, name="uniq_element_kod",
+            partialFilterExpression={"status": {"$in": ["do_wykonania", "zgloszony_gotowy", "odebrany"]}},
+        )
+    except Exception as e:
+        logger.warning(f"element unique index skipped: {e}")
+    # Schema prep (Etap 3): geometry fields, migrate legacy rows to 'punkt'.
+    mig = await db.elements.update_many(
+        {"geometria_typ": {"$exists": False}},
+        {"$set": {"geometria_typ": "punkt", "geometria_json": None}})
+    if mig.modified_count:
+        logger.info(f"migrated {mig.modified_count} elements to geometria_typ=punkt")
     # Seed the initial admin only when credentials are provided via environment.
     if ADMIN_EMAIL and ADMIN_PASSWORD:
         admin = await db.users.find_one({"email": ADMIN_EMAIL.lower()})

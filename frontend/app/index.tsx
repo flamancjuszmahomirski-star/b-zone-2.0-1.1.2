@@ -31,6 +31,8 @@ export default function Index() {
     if (loading) return;
     if (!user) {
       router.replace("/login");
+    } else if ((user as any).must_change_password) {
+      router.replace("/change-password");
     } else {
       registerForPush(user.id);
       router.replace("/(tabs)");
