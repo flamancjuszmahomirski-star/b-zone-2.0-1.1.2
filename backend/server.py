@@ -9,6 +9,7 @@ Conventions:
 """
 
 import os
+import re
 import uuid
 import asyncio
 import logging
@@ -80,6 +81,11 @@ def clean(doc: dict) -> dict:
         doc = dict(doc)
         doc.pop("_id", None)
     return doc
+
+
+def norm_kod(k: str) -> str:
+    """Comparison key for element codes: strip ALL whitespace + lowercase (G8)."""
+    return re.sub(r"\s+", "", (k or "")).lower()
 
 
 # Commercially sensitive project fields never exposed to the client (contractor).
@@ -204,6 +210,7 @@ class ApproveUserIn(BaseModel):
 class UpdateUserIn(BaseModel):
     imie: Optional[str] = None
     nazwisko: Optional[str] = None
+    email: Optional[EmailStr] = None
     telefon: Optional[str] = None
     rola: Optional[str] = None
     stawka_godz_eur: Optional[float] = None
@@ -490,8 +497,8 @@ class ChangePasswordIn(BaseModel):
 
 @api.post("/auth/change-password")
 async def change_password(body: ChangePasswordIn, user: dict = Depends(current_user)):
-    if len(body.nowe) < 8:
-        raise HTTPException(422, "Hasło musi mieć min. 8 znaków / Password min 8 chars")
+    if len(body.nowe) < 14:
+        raise HTTPException(422, "Hasło musi mieć min. 14 znaków / Password min 14 chars")
     # If the account is not in a forced-change state, verify the current password.
     if not user.get("must_change_password"):
         if not body.stare or not verify_pw(body.stare, user.get("hash", "")):
@@ -604,11 +611,34 @@ async def update_user(user_id: str, body: UpdateUserIn, admin: dict = Depends(re
     upd = {k: v for k, v in body.model_dump().items() if v is not None}
     if "rola" in upd and upd["rola"] not in ROLES:
         raise HTTPException(400, "Nieprawidłowa rola")
+    if "email" in upd:
+        upd["email"] = upd["email"].lower()
+        clash = await db.users.find_one({"email": upd["email"], "id": {"$ne": user_id}})
+        if clash:
+            raise HTTPException(409, "E-mail zajęty / Email already registered")
     await db.users.update_one({"id": user_id}, {"$set": upd})
     await audit(admin["id"], "edycja_uzytkownika", "user", user_id,
                 {"rola": u.get("rola"), "stawka": u.get("stawka_godz_eur")}, upd)
     doc = clean(await db.users.find_one({"id": user_id})); doc.pop("hash", None)
     return doc
+
+
+class AdminSetPwIn(BaseModel):
+    nowe: str
+
+
+@api.post("/users/{user_id}/reset-password")
+async def admin_reset_password(user_id: str, body: AdminSetPwIn, admin: dict = Depends(require("admin"))):
+    """Admin sets/resets any user's password; user must change it on next login."""
+    if len(body.nowe) < 14:
+        raise HTTPException(422, "Hasło musi mieć min. 14 znaków / Password min 14 chars")
+    u = await db.users.find_one({"id": user_id})
+    if not u:
+        raise HTTPException(404, "Nie znaleziono")
+    await db.users.update_one({"id": user_id}, {"$set": {
+        "hash": hash_pw(body.nowe), "must_change_password": True}})
+    await audit(admin["id"], "reset_hasla", "user", user_id)
+    return {"reset": True}
 
 
 @api.patch("/users/{user_id}/archive")
@@ -620,10 +650,22 @@ async def archive_user(user_id: str, admin: dict = Depends(require("admin"))):
 
 @api.delete("/users/{user_id}")
 async def delete_user(user_id: str, admin: dict = Depends(require("admin"))):
-    await db.users.delete_one({"id": user_id})
+    # E3: cannot delete your own account here, nor the last active admin.
+    if user_id == admin["id"]:
+        raise HTTPException(400, "Nie możesz usunąć własnego konta / Cannot delete your own account")
+    u = await db.users.find_one({"id": user_id})
+    if not u:
+        raise HTTPException(404, "Nie znaleziono")
+    if u.get("rola") == "admin":
+        other_admins = await db.users.count_documents(
+            {"rola": "admin", "status": "aktywny", "id": {"$ne": user_id}})
+        if other_admins == 0:
+            raise HTTPException(400, "Nie można usunąć ostatniego administratora / Cannot delete the last admin")
+    # Soft delete = archive (evidentiary: reports/hours reference the user).
+    await db.users.update_one({"id": user_id}, {"$set": {"status": "zarchiwizowany"}})
     await db.project_members.delete_many({"user_id": user_id})
     await audit(admin["id"], "usuniecie_uzytkownika", "user", user_id)
-    return {"deleted": True}
+    return {"archived": True}
 
 
 # ===========================================================================
@@ -1653,13 +1695,14 @@ async def create_element(vid: str, body: ElementIn, user: dict = Depends(require
     kod = (body.kod or "").strip()
     if not kod:
         raise HTTPException(422, "Kod jest wymagany / Code required")
-    dup = await db.elements.find_one({"project_id": view["project_id"], "kod": kod,
+    kn = norm_kod(kod)
+    dup = await db.elements.find_one({"project_id": view["project_id"], "kod_norm": kn,
                                       "status": {"$ne": "zarchiwizowany"}})
     if dup:
         raise HTTPException(409, f"Kod '{kod}' jest już użyty w tym projekcie / Code already used")
     doc = {"id": new_id(), "company_id": COMPANY_ID, "view_id": vid,
            "folder_id": view["folder_id"], "project_id": view["project_id"],
-           "kod": kod, "typ_id": body.typ_id, "opis": body.opis,
+           "kod": kod, "kod_norm": kn, "typ_id": body.typ_id, "opis": body.opis,
            "pozycja_x": body.pozycja_x, "pozycja_y": body.pozycja_y,
            "status": "do_wykonania", "zglosil_id": None, "zgloszony_at": None,
            "odebral_id": None, "odebrany_at": None, "ujete_w_rozliczeniu_id": None,
@@ -1686,7 +1729,7 @@ async def validate_codes(project_id: str, body: SeriesValidateIn,
             taken.append(k)  # duplicate within the batch itself
             continue
         seen.add(k)
-        ex = await db.elements.find_one({"project_id": project_id, "kod": k,
+        ex = await db.elements.find_one({"project_id": project_id, "kod_norm": norm_kod(k),
                                          "status": {"$ne": "zarchiwizowany"}})
         if ex:
             taken.append(k)
@@ -1701,10 +1744,12 @@ async def update_element(eid: str, body: ElementUpdateIn, user: dict = Depends(r
     upd = {k: v for k, v in body.model_dump().items() if v is not None}
     if "kod" in upd:
         upd["kod"] = upd["kod"].strip()
-        dup = await db.elements.find_one({"project_id": el["project_id"], "kod": upd["kod"],
+        kn = norm_kod(upd["kod"])
+        dup = await db.elements.find_one({"project_id": el["project_id"], "kod_norm": kn,
                                           "status": {"$ne": "zarchiwizowany"}, "id": {"$ne": eid}})
         if dup:
             raise HTTPException(409, f"Kod '{upd['kod']}' jest już użyty w tym projekcie / Code already used")
+        upd["kod_norm"] = kn
     if upd:
         await db.elements.update_one({"id": eid}, {"$set": upd})
     return clean(await db.elements.find_one({"id": eid}))
@@ -1715,7 +1760,7 @@ async def element_duplicates(project_id: str, user: dict = Depends(require("admi
     """Groups of active elements that share the same code (1.2 repair screen)."""
     pipe = [
         {"$match": {"project_id": project_id, "status": {"$ne": "zarchiwizowany"}}},
-        {"$group": {"_id": "$kod", "n": {"$sum": 1}, "ids": {"$push": "$id"}}},
+        {"$group": {"_id": "$kod_norm", "n": {"$sum": 1}, "ids": {"$push": "$id"}, "kod": {"$first": "$kod"}}},
         {"$match": {"n": {"$gt": 1}}},
     ]
     groups = []
@@ -1727,7 +1772,7 @@ async def element_duplicates(project_id: str, user: dict = Depends(require("admi
                 v = await db.views.find_one({"id": el["view_id"]})
                 els.append({"id": el["id"], "kod": el["kod"], "status": el["status"],
                             "widok_nazwa": v["nazwa"] if v else "?"})
-        groups.append({"kod": g["_id"], "count": g["n"], "elementy": els})
+        groups.append({"kod": g.get("kod") or g["_id"], "count": g["n"], "elementy": els})
     return groups
 
 
@@ -1819,6 +1864,56 @@ async def unreceive_elements(project_id: str, body: UnreceiveIn, user: dict = De
 
 
 
+EXPORT_SCHEMA_VERSION = 1
+EXPORT_COLLECTIONS = ["projects", "project_members", "folders", "views", "elements",
+                      "element_history", "daily_reports", "extra_hours", "issues",
+                      "deliveries", "element_types", "users", "files"]
+
+
+@api.get("/export/last")
+async def export_last(admin: dict = Depends(require("admin"))):
+    doc = await db.exports.find_one(sort=[("created_at", -1)])
+    return {"last_export_at": doc["created_at"] if doc else None}
+
+
+@api.get("/export")
+async def export_all(admin: dict = Depends(require("admin"))):
+    """Full data export for restore: one CSV per table + manifest.json, zipped.
+    Includes stable `id` and foreign-key fields (relations) + schema_version."""
+    import csv, io, zipfile, json as _json
+    buf = io.BytesIO()
+    manifest = {"schema_version": EXPORT_SCHEMA_VERSION, "exported_at": now_iso(),
+                "company_id": COMPANY_ID, "tables": {}}
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for col in EXPORT_COLLECTIONS:
+            rows = [clean(r) for r in await db[col].find({}).to_list(100000)]
+            if col == "users":
+                for r in rows:
+                    r.pop("hash", None)  # never export password hashes
+            keys: list = []
+            for r in rows:
+                for k in r.keys():
+                    if k not in keys:
+                        keys.append(k)
+            sio = io.StringIO()
+            w = csv.DictWriter(sio, fieldnames=keys, extrasaction="ignore")
+            w.writeheader()
+            for r in rows:
+                w.writerow({k: (_json.dumps(v, ensure_ascii=False) if isinstance(v, (dict, list)) else v)
+                            for k, v in r.items()})
+            zf.writestr(f"{col}.csv", sio.getvalue())
+            manifest["tables"][col] = {"rows": len(rows), "columns": keys}
+        zf.writestr("manifest.json", _json.dumps(manifest, ensure_ascii=False, indent=2))
+    buf.seek(0)
+    await db.exports.insert_one({"id": new_id(), "company_id": COMPANY_ID,
+                                 "created_by": admin["id"], "created_at": now_iso(),
+                                 "schema_version": EXPORT_SCHEMA_VERSION})
+    await audit(admin["id"], "eksport_danych", "company", COMPANY_ID)
+    fname = f"bzone-export-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}.zip"
+    return StreamingResponse(iter([buf.getvalue()]), media_type="application/zip",
+                             headers={"Content-Disposition": f'attachment; filename="{fname}"'})
+
+
 @api.get("/")
 async def root():
     return {"app": "B-ZONE 2.0", "status": "ok"}
@@ -1834,9 +1929,16 @@ async def startup():
     # Unique element code per project (1.2). Partial index over active elements only,
     # so archived duplicates never block re-use of a freed code.
     try:
+        await db.elements.drop_index("uniq_element_kod")
+    except Exception:
+        pass
+    # Backfill kod_norm for legacy rows BEFORE building the unique index (G8).
+    async for el in db.elements.find({"kod_norm": {"$exists": False}}, {"id": 1, "kod": 1}):
+        await db.elements.update_one({"id": el["id"]}, {"$set": {"kod_norm": norm_kod(el.get("kod", ""))}})
+    try:
         await db.elements.create_index(
-            [("company_id", 1), ("project_id", 1), ("kod", 1)],
-            unique=True, name="uniq_element_kod",
+            [("company_id", 1), ("project_id", 1), ("kod_norm", 1)],
+            unique=True, name="uniq_element_kod_norm",
             partialFilterExpression={"status": {"$in": ["do_wykonania", "zgloszony_gotowy", "odebrany"]}},
         )
     except Exception as e:

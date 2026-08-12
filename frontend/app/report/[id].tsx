@@ -142,12 +142,7 @@ export default function ReportDetail() {
               ) : null}
             </View>
           </Card>
-        ) : (
-          <Card style={styles.weather}>
-            <Ionicons name="cloud-offline-outline" size={20} color={colors.muted} />
-            <Text style={styles.weatherText}>{t("no_weather_data")}</Text>
-          </Card>
-        )}
+        ) : null}
       </ScrollView>
 
       {(isManager && report.status === "wyslany") || canDelete ? (

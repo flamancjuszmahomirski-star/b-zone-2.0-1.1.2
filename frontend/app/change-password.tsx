@@ -11,6 +11,7 @@ import { Header } from "@/src/components/Screen";
 import { TextField } from "@/src/components/TextField";
 import { Button } from "@/src/components/Button";
 import { useToast } from "@/src/components/Toast";
+import { PASSWORD_MIN } from "@/src/utils/validation";
 
 export default function ChangePassword() {
   const { t } = useI18n();
@@ -26,7 +27,7 @@ export default function ChangePassword() {
   const [saving, setSaving] = useState(false);
 
   const submit = async () => {
-    if (nowe.length < 8) { toast.show(t("password_min"), "error"); return; }
+    if (nowe.length < PASSWORD_MIN) { toast.show(t("password_min"), "error"); return; }
     if (nowe !== powtorz) { toast.show(t("passwords_mismatch"), "error"); return; }
     if (!forced && !stare) { toast.show(t("old_password"), "error"); return; }
     setSaving(true);

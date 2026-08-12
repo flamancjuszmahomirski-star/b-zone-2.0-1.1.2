@@ -1,7 +1,8 @@
 import React, { useState, useCallback } from "react";
-import { View, Text, StyleSheet, ScrollView } from "react-native";
+import { View, Text, StyleSheet, ScrollView, Pressable } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useLocalSearchParams, useFocusEffect } from "expo-router";
+import { useLocalSearchParams, useRouter, useFocusEffect } from "expo-router";
+import { Ionicons } from "@expo/vector-icons";
 import { colors, spacing, font, elementStatusColor } from "@/src/theme/tokens";
 import { useI18n } from "@/src/i18n/I18nContext";
 import { api } from "@/src/api/client";
@@ -13,6 +14,7 @@ import { formatDateTime } from "@/src/utils/format";
 export default function ElementTimeline() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { t, lang } = useI18n();
+  const router = useRouter();
   const insets = useSafeAreaInsets();
   const [el, setEl] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -43,6 +45,12 @@ export default function ElementTimeline() {
             <View style={{ flex: 1 }}>
               <Text style={styles.histAkcja}>{(h.akcja || "").replace(/_/g, " ")}</Text>
               <Text style={styles.histMeta}>{h.kto} · {formatDateTime(h.created_at, lang)}</Text>
+              {h.report_id ? (
+                <Pressable testID={`hist-report-${i}`} onPress={() => router.push(`/report/${h.report_id}`)} style={styles.reportLink}>
+                  <Ionicons name="document-text-outline" size={14} color={colors.brand} />
+                  <Text style={styles.reportLinkText}>{t("open_report")}</Text>
+                </Pressable>
+              ) : null}
             </View>
           </View>
         ))}
@@ -62,4 +70,6 @@ const styles = StyleSheet.create({
   histDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: colors.brand, marginTop: 5 },
   histAkcja: { color: colors.onSurface, fontSize: font.base, fontWeight: "700", textTransform: "capitalize" },
   histMeta: { color: colors.muted, fontSize: font.sm },
+  reportLink: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: 4 },
+  reportLinkText: { color: colors.brand, fontSize: font.sm, fontWeight: "700" },
 });

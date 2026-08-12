@@ -101,8 +101,14 @@ export async function transcribeAudio(
   form.append("file", audio as any);
   form.append("language", language);
   const headers = await authHeader();
-  const res = await fetch(`${API}/transcribe`, { method: "POST", headers, body: form });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.detail || "Transcription failed");
-  return data.text || "";
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 90000);
+  try {
+    const res = await fetch(`${API}/transcribe`, { method: "POST", headers, body: form, signal: controller.signal });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.detail || `Transcription failed (${res.status})`);
+    return data.text || "";
+  } finally {
+    clearTimeout(timer);
+  }
 }

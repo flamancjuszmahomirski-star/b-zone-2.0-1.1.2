@@ -1,7 +1,6 @@
 import React, { useState, useCallback } from "react";
 import { View, Text, StyleSheet, ScrollView, Pressable, Modal, TextInput, RefreshControl } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect } from "expo-router";
 import { colors, spacing, font, radius } from "@/src/theme/tokens";
 import { useI18n } from "@/src/i18n/I18nContext";
@@ -14,6 +13,7 @@ import { SelectField, SelectSheet } from "@/src/components/SelectSheet";
 import { ConfirmModal } from "@/src/components/ConfirmModal";
 import { EmptyState, LoadingState } from "@/src/components/States";
 import { useToast } from "@/src/components/Toast";
+import { personName, isValidEmail } from "@/src/utils/validation";
 
 export default function Users() {
   const { t } = useI18n();
@@ -28,6 +28,10 @@ export default function Users() {
   const [editUser, setEditUser] = useState<any>(null);
   const [role, setRole] = useState("worker");
   const [rate, setRate] = useState("0");
+  const [imie, setImie] = useState("");
+  const [nazwisko, setNazwisko] = useState("");
+  const [email, setEmail] = useState("");
+  const [telefon, setTelefon] = useState("");
   const [rolePicker, setRolePicker] = useState(false);
   const [deleteUser, setDeleteUser] = useState<any>(null);
 
@@ -52,7 +56,10 @@ export default function Users() {
     setEditUser({ ...u, isPending });
     setRole(u.rola || "worker");
     setRate(String(u.stawka_godz_eur || 0));
+    setImie(u.imie || ""); setNazwisko(u.nazwisko || ""); setEmail(u.email || ""); setTelefon(u.telefon || "");
   };
+
+  const rateRoles = ["foreman", "subcontractor", "worker"]; // roles that bill hourly (E4)
 
   const saveUser = async () => {
     if (!editUser) return;
@@ -61,9 +68,23 @@ export default function Users() {
       if (editUser.isPending) {
         await api(`/users/${editUser.id}/approve`, { method: "PATCH", body: { rola: role, stawka_godz_eur: rateNum } });
       } else {
-        await api(`/users/${editUser.id}`, { method: "PUT", body: { rola: role, stawka_godz_eur: rateNum } });
+        if (email && !isValidEmail(email)) { toast.show(t("invalid_email"), "error"); return; }
+        await api(`/users/${editUser.id}`, { method: "PUT", body: {
+          imie: imie.trim(), nazwisko: nazwisko.trim(), email: email.trim().toLowerCase(),
+          telefon: telefon.trim(), rola: role, stawka_godz_eur: rateNum } });
       }
       setEditUser(null); toast.show(t("saved")); load();
+    } catch (e: any) {
+      toast.show(e?.status === 409 ? t("email_taken") : (e.message || t("error_generic")), "error");
+    }
+  };
+
+  const resetPw = async () => {
+    if (!editUser) return;
+    try {
+      const gen = Math.random().toString(36).slice(2) + "Aa1!" + Math.random().toString(36).slice(2, 6);
+      await api(`/users/${editUser.id}/reset-password`, { method: "POST", body: { nowe: gen } });
+      toast.show(`${t("reset_password")}: ${gen}`);
     } catch (e: any) { toast.show(e.message || t("error_generic"), "error"); }
   };
 
@@ -105,9 +126,13 @@ export default function Users() {
               <View style={styles.userRow}>
                 <Avatar uri={u.avatar_url} imie={u.imie} nazwisko={u.nazwisko} size={44} />
                 <View style={{ flex: 1 }}>
-                  <Text style={styles.name}>{u.imie} {u.nazwisko}</Text>
+                  <Text style={styles.name}>{personName(u)}</Text>
                   <Text style={styles.meta}>{u.email}</Text>
-                  {tab === "active" && <Text style={styles.roleTag}>{t(`role_${u.rola}` as any)} · {u.stawka_godz_eur || 0} €/h</Text>}
+                  {tab === "active" && (
+                    <Text style={styles.roleTag}>
+                      {t(`role_${u.rola}` as any)}{rateRoles.includes(u.rola) ? ` · ${u.stawka_godz_eur || 0} €/h` : ""}
+                    </Text>
+                  )}
                 </View>
               </View>
               {tab === "pending" ? (
@@ -131,11 +156,38 @@ export default function Users() {
           <Pressable style={styles.sheet} onPress={() => {}}>
             <View style={styles.handle} />
             <Text style={styles.sheetTitle}>{editUser?.isPending ? t("approve_account") : t("edit")}</Text>
+            {!editUser?.isPending && (
+              <>
+                <View style={{ flexDirection: "row", gap: spacing.md }}>
+                  <View style={{ flex: 1, gap: spacing.xs }}>
+                    <Text style={styles.label}>{t("first_name")}</Text>
+                    <TextInput testID="user-imie" value={imie} onChangeText={setImie} style={styles.input} placeholderTextColor={colors.muted} />
+                  </View>
+                  <View style={{ flex: 1, gap: spacing.xs }}>
+                    <Text style={styles.label}>{t("last_name")}</Text>
+                    <TextInput testID="user-nazwisko" value={nazwisko} onChangeText={setNazwisko} style={styles.input} placeholderTextColor={colors.muted} />
+                  </View>
+                </View>
+                <View style={{ gap: spacing.xs }}>
+                  <Text style={styles.label}>{t("email")}</Text>
+                  <TextInput testID="user-email" value={email} onChangeText={setEmail} autoCapitalize="none" keyboardType="email-address" style={styles.input} placeholderTextColor={colors.muted} />
+                </View>
+                <View style={{ gap: spacing.xs }}>
+                  <Text style={styles.label}>{t("phone")}</Text>
+                  <TextInput testID="user-phone" value={telefon} onChangeText={setTelefon} keyboardType="phone-pad" style={styles.input} placeholderTextColor={colors.muted} />
+                </View>
+              </>
+            )}
             <SelectField testID="user-role" label={t("assign_role")} value={roleOptions.find((r) => r.value === role)?.label} placeholder={t("role")} onPress={() => setRolePicker(true)} />
-            <View style={{ gap: spacing.xs }}>
-              <Text style={styles.label}>{t("hourly_rate")}</Text>
-              <TextInput testID="user-rate" value={rate} onChangeText={setRate} keyboardType="decimal-pad" style={styles.input} placeholderTextColor={colors.muted} />
-            </View>
+            {rateRoles.includes(role) && (
+              <View style={{ gap: spacing.xs }}>
+                <Text style={styles.label}>{t("hourly_rate")}</Text>
+                <TextInput testID="user-rate" value={rate} onChangeText={setRate} keyboardType="decimal-pad" style={styles.input} placeholderTextColor={colors.muted} />
+              </View>
+            )}
+            {!editUser?.isPending && (
+              <Button title={t("reset_password")} onPress={resetPw} variant="secondary" icon="key-outline" testID="reset-pw" />
+            )}
             <View style={{ flexDirection: "row", gap: spacing.md, marginTop: spacing.sm }}>
               <Button title={t("cancel")} onPress={() => setEditUser(null)} variant="secondary" style={{ flex: 1 }} />
               <Button title={t("save")} onPress={saveUser} style={{ flex: 1 }} testID="save-user" />
@@ -145,7 +197,7 @@ export default function Users() {
       </Modal>
 
       <SelectSheet visible={rolePicker} title={t("assign_role")} options={roleOptions} selected={role} onSelect={setRole} onClose={() => setRolePicker(false)} />
-      <ConfirmModal visible={!!deleteUser} title={t("confirm_delete")} message={deleteUser ? `${deleteUser.imie} ${deleteUser.nazwisko}` : ""} confirmLabel={t("delete")} cancelLabel={t("cancel")} danger onConfirm={del} onCancel={() => setDeleteUser(null)} />
+      <ConfirmModal visible={!!deleteUser} title={t("confirm_delete")} message={deleteUser ? personName(deleteUser) : ""} confirmLabel={t("delete")} cancelLabel={t("cancel")} danger onConfirm={del} onCancel={() => setDeleteUser(null)} />
     </View>
   );
 }

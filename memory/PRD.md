@@ -50,6 +50,11 @@ admin, foreman (brygadzista), subcontractor (podwykonawca), worker (pracownik), 
 - 4. Schemat: elements.geometria_typ='punkt' + geometria_json=null (create + migracja).
 - Weryfikacja: 114/114 backend (11 runda1 + 70 regresja + 33 Etap2A). Cache Metro wyczyszczony.
 
+## Runda 1.1 (2026-08-12) — poprawki (część 1)
+ZROBIONE+zweryfikowane backend: A1 (hasło min 14 w JEDNYM miejscu PASSWORD_MIN, reset przez admina, stary hash unieważniany), E1 (pełna edycja usera + unikalność e-mail 409), E3 (blokada usunięcia siebie/ostatniego admina, delete=archiwizacja), E4 (brak €/h dla admin/kontrahent), G6 (link element→raport), G7 („Wybrano X elementów"), G8 (normalizacja kodu: białe znaki+wielkość liter, indeks kod_norm+backfill), B1 (eksport /export: CSV per tabela + manifest schema_version + stabilne ID/relacje, bez hashy haseł; /export/last), C1 (manifest OK → nie brak uprawnień; naprawiono UX: nagranie zachowane przy błędzie, konkretny błąd, retry, timeout 90s — wymaga builda do walidacji), G1 (brak karty pogody gdy brak danych), D2 zawężone (Zaznacz/Odznacz wszystkie + 48dp), C2 częściowo (mic w opisie godzin ekstra).
+DO ZROBIENIA (następna tura): D1 (tabela dostępu ról + brakujące ekrany brygadzisty/pracownika), F1 (wspólna powłoka Screen na ekranach z polami/akcją/tabami + nakładanie „Odbierz/Odbiory"), G2 (miniatura zdjęcia od razu), G4 (tygodniowe sumy godzin dla admina), G3 (audyt WSZYSTKICH komunikatów błędów), C2 pełne (mic we wszystkich polach), B1 przycisk eksportu w UI.
+UWAGA G5: w tym środowisku preview i prod współdzielą bazę bzone_database — dlatego dane testowe trafiały na produkcję. Zamknięcie ścieżki: testy backendu robione bez trwałych danych (throwaway TEST_ + pełny cleanup + przywrócenie hasha admina); NIE uruchamiam testing_agent na współdzielonej bazie. Dwa rekordy (UI_Test_c5fb8, test_ui_*) usuwa użytkownik sam w aplikacji.
+
 ## Notes / Not-yet-live
 - Push notifications: structure implemented (register-push + server-side send_push on events). Requires `google-services.json` (Android) + deploy → build to actually deliver; does NOT work in Expo Go.
 - App logo: bison-in-hard-hat placeholder ("BZ"/hammer) — swap in real PNG when provided (icon, splash, login).

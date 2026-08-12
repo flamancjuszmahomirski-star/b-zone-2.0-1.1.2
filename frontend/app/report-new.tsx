@@ -112,7 +112,7 @@ export default function ReportNew() {
           <Text style={styles.label}>{t("completed_elements")} ({t("optional")})</Text>
           <SelectField
             testID="report-elements"
-            value={elCount > 0 ? `${elCount} ${t("st_zgloszony_gotowy").toLowerCase()}` : undefined}
+            value={elCount > 0 ? `${t("elements_selected_prefix")} ${elCount} ${t("elements_word")}` : undefined}
             placeholder={t("select_elements")}
             onPress={() => { if (projectId) setElPicker(true); else toast.show(t("select_project"), "info"); }}
           />
@@ -137,6 +137,7 @@ export default function ReportNew() {
                 placeholder={t("delay_reason")}
                 onPress={() => setReasonPicker(true)}
               />
+              <VoiceRecorder onTranscribe={(text) => setExtraDesc((prev) => (prev ? prev + " " + text : text))} />
               <TextInput
                 testID="report-extra-desc"
                 value={extraDesc}

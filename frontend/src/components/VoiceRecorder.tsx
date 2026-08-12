@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from "react";
-import { View, Text, StyleSheet, Pressable, ActivityIndicator, Linking, Platform } from "react-native";
+import React, { useState } from "react";
+import { View, Text, StyleSheet, Pressable, ActivityIndicator, Linking } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import {
@@ -22,6 +22,16 @@ export function VoiceRecorder({ onTranscribe }: { onTranscribe: (text: string) =
   const state = useAudioRecorderState(recorder);
   const [busy, setBusy] = useState(false);
   const [perm, setPerm] = useState<boolean | null>(null);
+  const [lastUri, setLastUri] = useState<string | null>(null);
+
+  const sendUri = async (uri: string) => {
+    const ext = uri.split(".").pop()?.toLowerCase() || "m4a";
+    const isWeb = ext === "webm";
+    return transcribeAudio(
+      { uri, name: `nagranie.${ext}`, type: isWeb ? "audio/webm" : "audio/m4a" },
+      lang
+    );
+  };
 
   const ensurePermission = async (): Promise<boolean> => {
     const cur = await AudioModule.getRecordingPermissionsAsync();
@@ -46,21 +56,34 @@ export function VoiceRecorder({ onTranscribe }: { onTranscribe: (text: string) =
 
   const stopAndTranscribe = async () => {
     setBusy(true);
+    let uri: string | null = null;
     try {
       await recorder.stop();
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
-      const uri = recorder.uri;
-      if (!uri) throw new Error("no uri");
-      const ext = uri.split(".").pop()?.toLowerCase() || "m4a";
-      const isWeb = ext === "webm";
-      const text = await transcribeAudio(
-        { uri, name: `nagranie.${ext}`, type: isWeb ? "audio/webm" : "audio/m4a" },
-        lang
-      );
-      if (text) { onTranscribe(text); toast.show(t("saved")); }
-      else toast.show(t("error_generic"), "error");
-    } catch {
-      toast.show(t("error_generic"), "error");
+      uri = recorder.uri;
+      if (!uri) throw new Error(t("error_generic"));
+      setLastUri(uri);
+      const text = await sendUri(uri);
+      if (text) { onTranscribe(text); setLastUri(null); toast.show(t("saved")); }
+      else toast.show(t("transcription_empty"), "error");
+    } catch (e: any) {
+      // Keep the recording so the user can retry — never silently discard it.
+      if (uri) setLastUri(uri);
+      toast.show(`${t("transcription_failed")}: ${e?.message || ""}`.trim(), "error");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const retry = async () => {
+    if (!lastUri) return;
+    setBusy(true);
+    try {
+      const text = await sendUri(lastUri);
+      if (text) { onTranscribe(text); setLastUri(null); toast.show(t("saved")); }
+      else toast.show(t("transcription_empty"), "error");
+    } catch (e: any) {
+      toast.show(`${t("transcription_failed")}: ${e?.message || ""}`.trim(), "error");
     } finally {
       setBusy(false);
     }
@@ -96,6 +119,12 @@ export function VoiceRecorder({ onTranscribe }: { onTranscribe: (text: string) =
           </>
         )}
       </Pressable>
+      {lastUri && !busy && (
+        <Pressable testID="voice-retry" onPress={retry} style={styles.retry}>
+          <Ionicons name="refresh" size={18} color={colors.brand} />
+          <Text style={styles.retryText}>{t("transcription_retry")}</Text>
+        </Pressable>
+      )}
     </View>
   );
 }
@@ -114,4 +143,6 @@ const styles = StyleSheet.create({
     backgroundColor: colors.error + "18", borderRadius: radius.md,
   },
   deniedText: { color: colors.error, fontSize: font.base, flex: 1 },
+  retry: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, marginTop: spacing.sm, paddingVertical: spacing.md, borderRadius: radius.md, borderWidth: 1, borderColor: colors.brand },
+  retryText: { color: colors.brand, fontSize: font.base, fontWeight: "700" },
 });

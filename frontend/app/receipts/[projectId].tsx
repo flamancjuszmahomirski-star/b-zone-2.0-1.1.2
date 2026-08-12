@@ -50,7 +50,9 @@ export default function Receipts() {
   return (
     <View style={styles.screen}>
       <Header title={t("receipts")} back right={items.length > 0 ? (
-        <Pressable testID="select-all" onPress={selectAll} hitSlop={8}><Ionicons name="checkmark-done" size={24} color={colors.brand} /></Pressable>
+        <Pressable testID="select-all" onPress={toggleAll} hitSlop={8} style={{ minWidth: 48, minHeight: 48, alignItems: "center", justifyContent: "center" }}>
+          <Ionicons name={allSelected ? "close-circle" : "checkmark-done"} size={24} color={colors.brand} />
+        </Pressable>
       ) : undefined} />
       {loading ? (
         <LoadingState />
@@ -89,7 +91,7 @@ export default function Receipts() {
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.surface },
   group: { color: colors.muted, fontSize: font.sm, fontWeight: "700", textTransform: "uppercase" },
-  row: { flexDirection: "row", alignItems: "center", gap: spacing.md, paddingVertical: spacing.md },
+  row: { flexDirection: "row", alignItems: "center", gap: spacing.md, paddingVertical: spacing.md, minHeight: 48 },
   rowSel: { borderColor: colors.brand },
   kod: { color: colors.onSurface, fontSize: font.lg, fontWeight: "700", flex: 1 },
   readyDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: colors.warning },
