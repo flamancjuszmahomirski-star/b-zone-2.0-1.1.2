@@ -1,0 +1,44 @@
+{
+  "summary": "SOFT-ARCHIVE + OWNERSHIP HARDENING VERIFIED (backend only). New file /app/backend/tests/test_e4_soft_archive_and_ownership.py — 32/32 tests PASS. Existing /app/backend/tests/test_e3_security_regression.py — 26/26 tests PASS (no E3 regression). Combined 58/58. All four evidentiary DELETE endpoints (extra-hours, reports, issues, elements) now soft-archive (status='zarchiwizowany') and never call delete_one/delete_many on their collections. Static grep on server.py confirms this: no db.daily_reports.delete_*, no db.extra_hours.delete_*, no db.issues.delete_*, no db.elements.delete_*. Only db.project_members.delete_many/delete_one remains (correct — junction table). PUT /api/reports/{id} now enforces author-or-admin/foreman ownership (previously any logged-in user could edit any report). Archived rows are correctly excluded from GET listings via q.setdefault('status', {'$ne': 'zarchiwizowany'}). extra_hours already-in-settlement returns 409 for both owner and admin. Seed admin@bzone.app NOT touched — post-run login still 200.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_e4_soft_archive_and_ownership.py",
+    "/app/backend/tests/test_e3_security_regression.py",
+    "/app/test_reports/pytest/iter10_e4.xml",
+    "/app/test_reports/pytest/iter10_e3.xml"
+  ],
+  "action_items": [
+    "None — all requested fixes verified. Optional hardening: also apply the same author-or-admin/foreman ownership guard to PUT /issues (if exposed) and to any other update endpoints that currently rely only on current_user without owner check.",
+    "Optional cleanup: preview DB has accumulated ~30 test_* archived users from repeated regression runs; harmless but can be purged later."
+  ],
+  "critical_code_review_comments": [
+    "server.py:1001-1013 delete_extra — correct order: 404 first, then perms (owner OR admin/foreman -> 403), then 409 on ujete_w_rozliczeniu_id, then update status='zarchiwizowany'. Audit as 'archiwizacja_godzin_ekstra'.",
+    "server.py:1171-1182 update_report — NEW ownership check: `r.get('user_id') != user['id'] and rola not in (admin,foreman) -> 403`. Closes the previous vulnerability where any logged-in user could PUT any report.",
+    "server.py:1214-1224 delete_report — same ownership pattern, soft archive only, audit 'archiwizacja_raportu'.",
+    "server.py:1304-1314 delete_issue — same pattern; author OR admin/foreman -> archive.",
+    "server.py:1812-1822 delete_element — UNIFIED archive: no status-based branching; every status (do_wykonania / zgloszony_gotowy / odebrany / itd.) archives via update_one. Verified in tests test_do_wykonania_archives / test_zgloszony_gotowy_archives / test_odebrany_archives.",
+    "server.py:972 / 1122 / 1260 — list endpoints all use q.setdefault('status', {'$ne': 'zarchiwizowany'}) so archived rows drop out of GET while remaining in DB for evidentiary/audit purposes.",
+    "grep verified: `db\\.(daily_reports|extra_hours|issues|elements)\\.(delete_one|delete_many)` returns ZERO matches in server.py. Only db.project_members.delete_* remains, which is correct.",
+    "Suggestion for future: consider archiving-via-projection helper (single `_archive(collection, id, user)` function) — currently the pattern is repeated 4 times; low priority."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_e4_soft_archive_and_ownership.py (NEW, 460 lines, 32 tests across 7 test classes)"
+  ],
+  "success_rate": {
+    "backend": "100% (58/58 — 32 new + 26 pre-existing E3 regression)"
+  },
+  "seed_data_creation": "Per-test throwaway users test_workerA_*/test_workerB_*/test_foreman_*@example.com created and archived at teardown. One shared throwaway project TEST_E4_* + folder + view (module scope) archived via DELETE /projects/{pid} at teardown. No persistent modification to admin@bzone.app or preview production data.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Env: EXPO_PUBLIC_BACKEND_URL=https://app-builder-11766.preview.emergentagent.com (in /app/frontend/.env, NOT in the process env — the test file explicitly loads both /app/backend/.env AND /app/frontend/.env via python-dotenv). Admin: admin@bzone.app / MSbk566lLvI4b!U4. To re-run: `pytest backend/tests/test_e4_soft_archive_and_ownership.py backend/tests/test_e3_security_regression.py -v -o addopts=` (E3 file relies on process env, so `export $(grep -v ^# /app/frontend/.env | xargs)` first, OR run only the E4 file which auto-loads env). Every DELETE endpoint on evidentiary data (extra-hours/reports/issues/elements) MUST return {archived: true} — if you ever see {deleted: true} on those, that's a regression. DELETE /auth/me still returns {deleted: true} (semantics for the self-service endpoint) but the underlying operation is still a status update.",
+  "rca_of_issue": "FIX VERIFICATION: The historical incident (hard-deleted user account) prompted a broader audit that revealed 4 additional endpoints performing db.<col>.delete_one on evidentiary data (billing hours, daily reports, quality issues, plan elements) and one endpoint (PUT /reports/{id}) missing an ownership check. All five have been fixed: (a) DELETE endpoints now `update_one({'$set': {'status': 'zarchiwizowany'}})` + audit; (b) permission gates enforce author-or-admin/foreman with 403 for other users; (c) 409 conflict preserved on extra_hours with ujete_w_rozliczeniu_id; (d) elements archive UNIFORMLY across all status values (no more delete_one on 'zgloszony_gotowy' or 'do_wykonania'). GET listing queries hide archived rows via q.setdefault so the UX is unchanged while the underlying rows remain immutable evidence. A static grep test in the suite prevents accidental re-introduction of hard-delete on these four collections."
+}

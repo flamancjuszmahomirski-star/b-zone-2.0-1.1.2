@@ -55,6 +55,13 @@ ZROBIONE+zweryfikowane backend: A1 (hasło min 14 w JEDNYM miejscu PASSWORD_MIN,
 DO ZROBIENIA (następna tura): D1 (tabela dostępu ról + brakujące ekrany brygadzisty/pracownika), F1 (wspólna powłoka Screen na ekranach z polami/akcją/tabami + nakładanie „Odbierz/Odbiory"), G2 (miniatura zdjęcia od razu), G4 (tygodniowe sumy godzin dla admina), G3 (audyt WSZYSTKICH komunikatów błędów), C2 pełne (mic we wszystkich polach), B1 przycisk eksportu w UI.
 UWAGA G5: w tym środowisku preview i prod współdzielą bazę bzone_database — dlatego dane testowe trafiały na produkcję. Zamknięcie ścieżki: testy backendu robione bez trwałych danych (throwaway TEST_ + pełny cleanup + przywrócenie hasha admina); NIE uruchamiam testing_agent na współdzielonej bazie. Dwa rekordy (UI_Test_c5fb8, test_ui_*) usuwa użytkownik sam w aplikacji.
 
+## Runda 1.1-hotfix (2026-08-12) — incydent: utrata konta admina + twarde kasowanie
+PRZYCZYNA: self-service `DELETE /api/auth/me` (App Store) robił TWARDE kasowanie bez blokad → admin skasował własne konto. E3 chroniło tylko `/users/{id}`.
+NAPRAWY (zweryfikowane testerem 58/58): (1) `DELETE /auth/me` → blokada ostatniego admina + archiwizacja; (2) seed odtwarza/reaktywuje `admin@bzone.app` przy starcie (chirurgicznie, tylko to konto); (3) 4 endpointy dowodowe (extra-hours, reports, issues, elements) → archiwizacja zamiast delete_one + kontrola rola/właściciel; elementy jednolicie archiwizowane niezależnie od statusu; (4) `PUT /reports` → kontrola autor/manager; (5) listy wykluczają `zarchiwizowany`. W server.py NIE ma już delete_one na daily_reports/extra_hours/issues/elements (tylko project_members = join).
+SEED_ADMIN_PASSWORD ustawione na Chelsea1234567890! (wymuszona zmiana przy 1. logowaniu).
+P3: stawka_godz_eur (koszt) i marża NIEwidoczne dla foreman/subcontractor na poziomie endpointów. P4: worker==subcontractor identyczne ekrany (różnica tylko w modelu danych).
+ŚRODOWISKO: preview (localhost:27017/bzone_database) i produkcja to RÓŻNE bazy; produkcja niedostępna z preview. Do Rundy 1.2: regresje 1.0.6 (Odbiory crash, czarny rysunek) + F1/D1/G4/G2/G3/C2/przycisk eksportu/D2 select-all/martwy „Zresetuj hasło".
+
 ## Notes / Not-yet-live
 - Push notifications: structure implemented (register-push + server-side send_push on events). Requires `google-services.json` (Android) + deploy → build to actually deliver; does NOT work in Expo Go.
 - App logo: bison-in-hard-hat placeholder ("BZ"/hammer) — swap in real PNG when provided (icon, splash, login).

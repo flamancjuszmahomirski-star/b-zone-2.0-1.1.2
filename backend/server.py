@@ -969,6 +969,7 @@ async def list_extra(project_id: Optional[str] = None, mine: bool = False,
         q["project_id"] = project_id
     if mine or user["rola"] in ("worker", "subcontractor"):
         q["user_id"] = user["id"]
+    q.setdefault("status", {"$ne": "zarchiwizowany"})
     rows = await db.extra_hours.find(q).sort("created_at", -1).to_list(1000)
     return [clean(r) for r in rows]
 
@@ -999,9 +1000,17 @@ async def reject_extra(eid: str, user: dict = Depends(require("admin", "foreman"
 
 @api.delete("/extra-hours/{eid}")
 async def delete_extra(eid: str, user: dict = Depends(current_user)):
-    await db.extra_hours.delete_one({"id": eid})
-    await audit(user["id"], "usuniecie_godzin_ekstra", "extra_hours", eid)
-    return {"deleted": True}
+    e = await db.extra_hours.find_one({"id": eid})
+    if not e:
+        raise HTTPException(404, "Nie znaleziono")
+    # Permission: owner or a manager (admin/foreman). Never hard-delete billing data.
+    if e.get("user_id") != user["id"] and user.get("rola") not in ("admin", "foreman"):
+        raise HTTPException(403, "Brak uprawnień / Not allowed")
+    if e.get("ujete_w_rozliczeniu_id"):
+        raise HTTPException(409, "Pozycja ujęta w rozliczeniu — nie można usunąć / Included in settlement")
+    await db.extra_hours.update_one({"id": eid}, {"$set": {"status": "zarchiwizowany"}})
+    await audit(user["id"], "archiwizacja_godzin_ekstra", "extra_hours", eid)
+    return {"archived": True}
 
 
 # ===========================================================================
@@ -1110,6 +1119,7 @@ async def list_reports(project_id: Optional[str] = None, mine: bool = False,
         ids = await user_project_ids(user)
         q["project_id"] = {"$in": ids}
         q["status"] = "zatwierdzony"
+    q.setdefault("status", {"$ne": "zarchiwizowany"})
     rows = await db.daily_reports.find(q).sort("created_at", -1).to_list(1000)
     out = []
     for r in rows:
@@ -1163,6 +1173,8 @@ async def update_report(report_id: str, body: ReportIn, user: dict = Depends(cur
     r = await db.daily_reports.find_one({"id": report_id})
     if not r:
         raise HTTPException(404, "Nie znaleziono")
+    if r.get("user_id") != user["id"] and user.get("rola") not in ("admin", "foreman"):
+        raise HTTPException(403, "Brak uprawnień / Not allowed")
     await db.daily_reports.update_one({"id": report_id}, {"$set": {
         "opis": body.opis, "zdjecia": body.zdjecia, "transkrypcja": body.transkrypcja,
         "element_ids": body.element_ids}})
@@ -1201,9 +1213,15 @@ async def reject_report(report_id: str, body: RejectIn, user: dict = Depends(req
 
 @api.delete("/reports/{report_id}")
 async def delete_report(report_id: str, user: dict = Depends(current_user)):
-    await db.daily_reports.delete_one({"id": report_id})
-    await audit(user["id"], "usuniecie_raportu", "daily_report", report_id)
-    return {"deleted": True}
+    r = await db.daily_reports.find_one({"id": report_id})
+    if not r:
+        raise HTTPException(404, "Nie znaleziono")
+    # Permission: author or a manager (admin/foreman). Reports are evidentiary — archive only.
+    if r.get("user_id") != user["id"] and user.get("rola") not in ("admin", "foreman"):
+        raise HTTPException(403, "Brak uprawnień / Not allowed")
+    await db.daily_reports.update_one({"id": report_id}, {"$set": {"status": "zarchiwizowany"}})
+    await audit(user["id"], "archiwizacja_raportu", "daily_report", report_id)
+    return {"archived": True}
 
 
 # ===========================================================================
@@ -1239,6 +1257,7 @@ async def list_issues(project_id: Optional[str] = None, mine: bool = False,
         q["project_id"] = project_id
     if mine or user["rola"] in ("worker", "subcontractor"):
         q["user_id"] = user["id"]
+    q.setdefault("status", {"$ne": "zarchiwizowany"})
     rows = await db.issues.find(q).sort("created_at", -1).to_list(1000)
     out = []
     for r in rows:
@@ -1284,9 +1303,15 @@ async def issue_status(issue_id: str, body: IssueStatusIn, user: dict = Depends(
 
 @api.delete("/issues/{issue_id}")
 async def delete_issue(issue_id: str, user: dict = Depends(current_user)):
-    await db.issues.delete_one({"id": issue_id})
-    await audit(user["id"], "usuniecie_zgloszenia", "issue", issue_id)
-    return {"deleted": True}
+    r = await db.issues.find_one({"id": issue_id})
+    if not r:
+        raise HTTPException(404, "Nie znaleziono")
+    # Permission: author or a manager (admin/foreman). Archive only.
+    if r.get("user_id") != user["id"] and user.get("rola") not in ("admin", "foreman"):
+        raise HTTPException(403, "Brak uprawnień / Not allowed")
+    await db.issues.update_one({"id": issue_id}, {"$set": {"status": "zarchiwizowany"}})
+    await audit(user["id"], "archiwizacja_zgloszenia", "issue", issue_id)
+    return {"archived": True}
 
 
 # ===========================================================================
@@ -1789,14 +1814,12 @@ async def delete_element(eid: str, user: dict = Depends(require("admin", "forema
     el = await db.elements.find_one({"id": eid})
     if not el:
         raise HTTPException(404, "Nie znaleziono")
-    if el.get("status") == "odebrany" or el.get("ujete_w_rozliczeniu_id"):
-        # Protect evidentiary/financial records — archive instead of delete.
-        await db.elements.update_one({"id": eid}, {"$set": {"status": "zarchiwizowany"}})
-        await _log_element(eid, "zarchiwizowany", el.get("status"), "zarchiwizowany", user["id"])
-        return {"archived": True, "message": "Element odebrany — zarchiwizowano zamiast usunięcia."}
-    await db.elements.delete_one({"id": eid})
-    await audit(user["id"], "usuniecie_elementu", "element", eid)
-    return {"deleted": True}
+    # Unified: ALWAYS archive, never hard-delete. A reported/received element is the
+    # basis for settlement and must never vanish, regardless of its status.
+    await db.elements.update_one({"id": eid}, {"$set": {"status": "zarchiwizowany"}})
+    await _log_element(eid, "zarchiwizowany", el.get("status"), "zarchiwizowany", user["id"])
+    await audit(user["id"], "archiwizacja_elementu", "element", eid)
+    return {"archived": True}
 
 
 @api.get("/elements/{eid}")
