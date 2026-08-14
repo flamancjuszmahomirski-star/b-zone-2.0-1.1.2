@@ -1,0 +1,47 @@
+{
+  "summary": "E3 security regression suite: 19/19 tests PASS on backend/tests/test_e3_security_regression.py covering E3-a (self-delete via DELETE /api/users/{me} → 400 + admin still active + can still login), E3-b (last-admin & self-delete via second admin → 400; deleting another admin while seed remains → 200 archived, no hard delete), E3-c (worker delete returns {archived:true}, record persists with status='zarchiwizowany', disappears from ?status=aktywny listing), E3-d (archived user login → 403), E1 (PUT /users/{id}: 409 duplicate email, 422 invalid email, full field edit persists), A1 (POST /users/{id}/reset-password: 422 if <14 chars, 200 sets must_change_password=true; POST /auth/change-password: 422 if new <14), G8 (POST /views/{vid}/elements: 409 for 'a01', 'A01', '  A  01  ' vs existing 'A 01' after norm_kod). ★ CRITICAL RCA FINDING ★ — the E3 guard exists ONLY on DELETE /api/users/{id}. There is a SECOND, UNPROTECTED self-deletion endpoint: DELETE /api/auth/me (server.py:522-528) which does db.users.delete_one({'id': user['id']}) — a HARD DELETE, no self-guard, no last-admin guard, no soft-archive. Reproduced live in preview: created throwaway admin B, logged in as B, called DELETE /api/auth/me → 200 {'deleted':true} → B's record is GONE from users collection. This is almost certainly the actual production incident vector: admin tapped 'Usuń moje konto' (App-Store/Play-Store self-service) and E3 never fired because E3 is on the OTHER endpoint. Main agent MUST harden DELETE /auth/me with the same three checks (block admin+last-admin via 400, and soft-archive instead of hard delete). No test data left behind — all TEST_* users archived, TEST_E3_G8_* project archived (soft). Admin admin@bzone.app was NEVER modified/deleted (password unchanged, still active).",
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "DELETE /api/auth/me",
+        "issue": "Hard-deletes the caller with NO guards: self admin can delete their own account, last active admin can be wiped, and it is a hard delete (not archive). This bypasses E3 completely and is the plausible RCA of the production incident. Reproduced live: throwaway admin → DELETE /auth/me → 200 {deleted:true} → user record physically gone.",
+        "priority": "CRITICAL"
+      }
+    ],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_e3_security_regression.py",
+    "/app/test_reports/pytest/iter8_e3.xml"
+  ],
+  "action_items": [
+    "HIGHEST PRIORITY: Harden DELETE /api/auth/me in server.py (~line 522). Mirror the DELETE /users/{id} logic: (1) if the caller has rola=='admin', count other active admins — if 0, refuse with 400 'ostatni administrator'; (2) NEVER db.users.delete_one — instead set status='zarchiwizowany' (soft delete) so hours/reports remain evidentiary; (3) delete project_members but keep the user row; (4) add audit 'usuniecie_wlasnego_konta' with archive semantics; (5) update client-side self-delete confirmation copy to reflect archive semantics for admins.",
+    "Consider adding a MongoDB constraint or startup check that always keeps >=1 active admin (fail-safe seed re-promotion) as defence in depth.",
+    "Add a regression test for DELETE /auth/me covering: (a) admin self-delete → 400 last-admin (if sole admin); (b) admin with peers → 200 but user is archived, not gone; (c) worker/foreman self-delete → 200 archived (soft)."
+  ],
+  "critical_code_review_comments": [
+    "server.py:522-528 (delete_my_account) uses db.users.delete_one — the ONLY hard-delete of users in the entire codebase. Every other path (DELETE /users/{id}, PATCH /users/{id}/archive) already does soft delete. Root cause: this endpoint was added for App Store self-service and predates the E3 hardening on the admin-delete path. Fix must not regress App Store compliance — soft delete + optional PII scrub is acceptable per policy.",
+    "delete_user at server.py:651-668 is fully correct: self-guard, last-admin count, soft-archive, project_members cleanup, audit. Verified end-to-end.",
+    "The last-admin guard in delete_user counts by {'rola':'admin','status':'aktywny','id':{'$ne':user_id}}. Correct — excludes the target. Also correctly ignores 'zarchiwizowany' rows.",
+    "G8 norm_kod uses re.sub(r'\\s+','', k).lower() — catches leading/trailing/inner whitespace AND case. Combined with project-scoped kod_norm unique index + application-level 409, this is bulletproof against the reported collision patterns.",
+    "A1 change-password uses must_change_password to skip old-password check on forced rotation — matches product intent. Length gate 14 chars is applied consistently on both admin reset and self change.",
+    "E1 update_user email uniqueness uses {'email': lower, 'id': {'$ne': user_id}} — correct exclusion for the record being edited."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_e3_security_regression.py (NEW — 19 tests, all passing)"
+  ],
+  "success_rate": {
+    "backend": "100% (19/19 E3 regression tests pass) — but a NEW, PREVIOUSLY-UNSCOPED CRITICAL BUG in DELETE /auth/me was discovered during RCA analysis"
+  },
+  "seed_data_creation": "Per-test fixtures create TEST_* workers/second admins with test_*@example.com emails; teardown archives them via PATCH /users/{id}/archive. G8 fixture creates TEST_E3_G8_* project + folder + view + elements; teardown DELETE /projects/{id} (soft archive). Admin admin@bzone.app untouched.",
+  "retest_needed": true,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Env: export EXPO_PUBLIC_BACKEND_URL=https://app-builder-11766.preview.emergentagent.com. Admin: admin@bzone.app / MSbk566lLvI4b!U4. Run: pytest backend/tests/test_e3_security_regression.py -v -o addopts=. After main agent hardens DELETE /auth/me, add test cases in the same file: (1) throwaway admin self-delete via /auth/me when sole active admin → expect 400; (2) admin self-delete via /auth/me with peers → expect 200 + status becomes 'zarchiwizowany' (NOT hard delete); (3) verify record still exists via GET /users after self-archive. Do NOT ever call DELETE /auth/me on admin@bzone.app — always test with throwaway TEST_* admins.",
+  "rca_of_issue": "PRODUCTION INCIDENT ROOT CAUSE (high confidence): E3 hardening was added to DELETE /api/users/{id} but the App-Store-mandated self-service endpoint DELETE /api/auth/me (server.py:522) was never updated. It performs an UNGUARDED HARD DELETE (db.users.delete_one). Reproduction (verified live in preview against a throwaway admin, NOT the seed admin): 1) POST /auth/register + admin approves as rola='admin'; 2) log in as that admin; 3) DELETE /auth/me → HTTP 200 {'deleted':true}; 4) admin row is GONE from users collection. This exactly matches 'admin usunął własne konto mimo blokady E3' — E3 fires only on the OTHER endpoint. Mitigation: apply the same three checks (block-if-admin-and-last / soft-archive-not-hard-delete / keep evidentiary FK targets) to DELETE /auth/me. See action_items."
+}

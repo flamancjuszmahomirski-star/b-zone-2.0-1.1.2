@@ -521,8 +521,16 @@ async def update_me(body: ProfileIn, user: dict = Depends(current_user)):
 
 @api.delete("/auth/me")
 async def delete_my_account(user: dict = Depends(current_user)):
-    """Self-service account deletion (App Store / Play Store requirement)."""
-    await db.users.delete_one({"id": user["id"]})
+    """Self-service account deletion (App Store / Play Store requirement).
+    A sole active admin CANNOT delete themselves (would lock the company out).
+    Deletion is a soft-archive: the account can no longer log in, but evidentiary
+    rows (reports/hours) keep their author reference intact."""
+    if user.get("rola") == "admin":
+        other_admins = await db.users.count_documents(
+            {"rola": "admin", "status": "aktywny", "id": {"$ne": user["id"]}})
+        if other_admins == 0:
+            raise HTTPException(400, "Nie możesz usunąć konta ostatniego administratora — najpierw utwórz innego administratora / Cannot delete the last admin account")
+    await db.users.update_one({"id": user["id"]}, {"$set": {"status": "zarchiwizowany"}})
     await db.project_members.delete_many({"user_id": user["id"]})
     await audit(user["id"], "usuniecie_wlasnego_konta", "user", user["id"])
     return {"deleted": True}
@@ -1957,9 +1965,19 @@ async def startup():
                 "id": new_id(), "company_id": COMPANY_ID, "email": ADMIN_EMAIL.lower(),
                 "hash": hash_pw(ADMIN_PASSWORD), "imie": "Administrator", "nazwisko": "B-Zone",
                 "rola": "admin", "avatar_url": None, "telefon": "", "status": "aktywny",
-                "stawka_godz_eur": 0.0, "jezyk": "pl", "created_at": now_iso(),
+                "stawka_godz_eur": 0.0, "jezyk": "pl", "must_change_password": True,
+                "created_at": now_iso(),
             })
-            logger.info(f"Seeded admin: {ADMIN_EMAIL}")
+            logger.info(f"Seeded admin (created): {ADMIN_EMAIL}")
+        elif admin.get("status") != "aktywny" or admin.get("rola") != "admin":
+            # RECOVERY (surgical): reactivate a soft-deleted/archived/locked seed admin so
+            # the owner can never be permanently locked out. Touches ONLY this one account —
+            # never other users, projects, elements or reports. A healthy active admin is left
+            # untouched (no password reset on normal restarts).
+            await db.users.update_one({"id": admin["id"]}, {"$set": {
+                "status": "aktywny", "rola": "admin",
+                "hash": hash_pw(ADMIN_PASSWORD), "must_change_password": True}})
+            logger.warning(f"Seeded admin (reactivated locked-out account): {ADMIN_EMAIL}")
     if await db.delay_reasons.count_documents({"company_id": COMPANY_ID}) == 0:
         defaults = [
             ("Silny wiatr", "Strong wind"), ("Opady deszczu", "Rain"),

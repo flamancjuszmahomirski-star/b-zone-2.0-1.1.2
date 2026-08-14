@@ -1,0 +1,39 @@
+{
+  "summary": "RETEST FIX VERIFIED — DELETE /api/auth/me hardening is correct. 26/26 tests pass on /app/backend/tests/test_e3_security_regression.py (extended with 7 new tests under TestE3MeSelfArchiveWorker, TestE3MeAdminWithPeersArchived, TestE3MeSoleAdminBlocked, TestE3MeNoHardDeletePathExists). Covered scenarios: (1) worker self-delete → 200 {deleted:true}, row persists with status='zarchiwizowany', cannot re-login (401/403). (2) admin with peers (seed admin remains) self-delete → 200 {deleted:true}, row archived, cannot login. (3) sole active admin (transiently made sole by flipping seed.status via direct DB write, restored in try/finally + fixture guard) → 400 with 'ostatni administrator' message, throwaway admin NOT archived (status=aktywny), can still login. (4) Static grep on server.py: NO db.users.delete_one/delete_many anywhere — every user-delete path is soft-archive. (5) Audit-log consistency: every 'usuniecie_wlasnego_konta' entry has a corresponding still-existing user row (proves no hard delete happened historically in preview DB either). E3 regression on DELETE /users/{id} still 100% (self-delete 400, last-admin 400, worker 200 archived, archived cannot login). Seed admin@bzone.app was NEVER modified persistently — status flip in the sole-admin test is reverted in finally and double-verified by the seed_admin_status_guard fixture; post-run check confirms seed status=aktywny and seed login → 200.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_e3_security_regression.py",
+    "/app/test_reports/pytest/iter9_e3_me.xml"
+  ],
+  "action_items": [
+    "None — DELETE /auth/me fix is complete and verified. Optional defence-in-depth: startup healthcheck that guarantees >=1 active admin exists; if 0 detected, auto-reactivate seed admin (already effectively enforced by tests).",
+    "Optional: purge the accumulated test_* archived admins from preview DB if the count grows large (currently ~10, harmless)."
+  ],
+  "critical_code_review_comments": [
+    "server.py:522-536 (delete_my_account) now correctly mirrors delete_user semantics: last-admin guard via count_documents({rola:'admin', status:'aktywny', id:{$ne:self}}) → 400, then $set status='zarchiwizowany', then project_members.delete_many, then audit 'usuniecie_wlasnego_konta'. No db.users.delete_one anywhere in server.py (grep-verified).",
+    "The last-admin guard fires ONLY when caller is admin AND no other active admins exist. This is the correct scope — non-admins skip the guard entirely and always soft-archive. Matches product intent (App Store compliance + evidentiary preservation).",
+    "Soft-archive keeps the user row for FK integrity (daily_reports, extra_hours, audit_log all reference user id). Status='zarchiwizowany' correctly gates login in /api/auth/login (line ~481-482).",
+    "project_members.delete_many is intentionally hard-deleted (junction table, no evidentiary value) — correct trade-off.",
+    "No regression on DELETE /users/{id}: 19/19 E3 tests still green."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_e3_security_regression.py (added dotenv import + 4 new test classes / 7 new tests: TestE3MeSelfArchiveWorker (3), TestE3MeAdminWithPeersArchived (1), TestE3MeSoleAdminBlocked (1), TestE3MeNoHardDeletePathExists (2))"
+  ],
+  "success_rate": {
+    "backend": "100% (26/26 tests pass; 7 new tests for DELETE /auth/me + 19 pre-existing regression tests)"
+  },
+  "seed_data_creation": "Per-test throwaway users test_worker_*@example.com and test_admin2_*@example.com / test_solememeadmin_*@example.com created + soft-archived at teardown. Seed admin@bzone.app status was transiently flipped once during TestE3MeSoleAdminBlocked and restored inside try/finally + fixture guard; post-run verification confirms status=aktywny and login=200.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Env: EXPO_PUBLIC_BACKEND_URL=https://app-builder-11766.preview.emergentagent.com. Admin: admin@bzone.app / MSbk566lLvI4b!U4. Run: pytest backend/tests/test_e3_security_regression.py -v -o addopts=. Notes: TestE3MeSoleAdminBlocked transiently sets seed admin status='zarchiwizowany' and restores in finally — if the test process is killed mid-run, seed admin may be left archived; verify via direct MongoDB check `db.users.find_one({email:'admin@bzone.app'}).status == 'aktywny'` before considering any auth failure a real bug. The fixture seed_admin_status_guard provides a second safety net. DO NOT ever call DELETE /auth/me while logged in as the seed admin.",
+  "rca_of_issue": "FIX VERIFICATION: The DELETE /api/auth/me endpoint now enforces the same three protections as DELETE /api/users/{id}: (1) last-active-admin block (400), (2) soft-archive via status update (never delete_one), (3) project_members cleanup. Reproduction of the original incident is now IMPOSSIBLE: a sole active admin calling DELETE /auth/me receives 400 and remains logged in. The reported production incident vector (admin tapping 'Delete my account' in the mobile self-service flow) is closed. Historical audit_log entries for 'usuniecie_wlasnego_konta' were cross-checked — every such entry still has a corresponding user row (no orphaned hard-delete events remain)."
+}
