@@ -10,7 +10,7 @@ export function fileUrl(path?: string | null): string | undefined {
   return `${BACKEND_URL}${path}`;
 }
 
-async function authHeader(): Promise<Record<string, string>> {
+export async function authHeader(): Promise<Record<string, string>> {
   const token = await storage.secureGet<string>(TOKEN_KEY, "");
   return token ? { Authorization: `Bearer ${token}` } : {};
 }

@@ -88,6 +88,14 @@ def norm_kod(k: str) -> str:
     return re.sub(r"\s+", "", (k or "")).lower()
 
 
+# Single source of truth for password policy (B1) — used in ALL password paths.
+PASSWORD_MIN = 14
+# Element statuses considered "active" (everything except archived) — used for the
+# unique-code partial index (C1) so every live status is covered, not just a subset.
+ACTIVE_ELEMENT_STATUSES = ["do_wykonania", "zgloszony_gotowy", "odebrany",
+                           "wstrzymany", "cofniecie_odbioru"]
+
+
 # Commercially sensitive project fields never exposed to the client (contractor).
 _FIN_PROJECT_FIELDS = ("stawka_sprzedazy_godz", "bryg_widzi_stawki",
                        "termin_platnosci_klient_dni", "termin_platnosci_ekipa_dni", "vat_tryb")
@@ -449,8 +457,8 @@ async def ensure_accrual(project: dict, day: str):
 # ===========================================================================
 @api.post("/auth/register", status_code=201)
 async def register(body: RegisterIn):
-    if len(body.haslo) < 6:
-        raise HTTPException(422, "Hasło min. 6 znaków / Password min 6 chars")
+    if len(body.haslo) < PASSWORD_MIN:
+        raise HTTPException(422, f"Hasło musi mieć min. {PASSWORD_MIN} znaków / Password min {PASSWORD_MIN} chars")
     exists = await db.users.find_one({"email": body.email.lower()})
     if exists:
         raise HTTPException(409, "E-mail zajęty / Email already registered")
@@ -497,8 +505,8 @@ class ChangePasswordIn(BaseModel):
 
 @api.post("/auth/change-password")
 async def change_password(body: ChangePasswordIn, user: dict = Depends(current_user)):
-    if len(body.nowe) < 14:
-        raise HTTPException(422, "Hasło musi mieć min. 14 znaków / Password min 14 chars")
+    if len(body.nowe) < PASSWORD_MIN:
+        raise HTTPException(422, f"Hasło musi mieć min. {PASSWORD_MIN} znaków / Password min {PASSWORD_MIN} chars")
     # If the account is not in a forced-change state, verify the current password.
     if not user.get("must_change_password"):
         if not body.stare or not verify_pw(body.stare, user.get("hash", "")):
@@ -552,12 +560,12 @@ async def reset_request(body: ResetRequestIn):
 
 @api.post("/auth/password-reset/confirm")
 async def reset_confirm(body: ResetConfirmIn):
-    if len(body.nowe_haslo) < 6:
-        raise HTTPException(422, "Hasło min. 6 znaków")
+    if len(body.nowe_haslo) < PASSWORD_MIN:
+        raise HTTPException(422, f"Hasło musi mieć min. {PASSWORD_MIN} znaków / Password min {PASSWORD_MIN} chars")
     rec = await db.password_resets.find_one({"token": body.token, "used": False})
     if not rec or rec["expires_at"] < now_iso():
         raise HTTPException(400, "Token nieprawidłowy lub wygasł / Invalid or expired")
-    await db.users.update_one({"id": rec["user_id"]}, {"$set": {"hash": hash_pw(body.nowe_haslo)}})
+    await db.users.update_one({"id": rec["user_id"]}, {"$set": {"hash": hash_pw(body.nowe_haslo), "must_change_password": True}})
     await db.password_resets.update_one({"id": rec["id"]}, {"$set": {"used": True}})
     return {"message": "Hasło zmienione / Password reset"}
 
@@ -565,6 +573,38 @@ async def reset_confirm(body: ResetConfirmIn):
 # ===========================================================================
 # USERS (admin)
 # ===========================================================================
+@api.get("/admin/health")
+async def admin_health(admin: dict = Depends(require("admin"))):
+    """Read-only diagnostyka startowa (admin): stan indeksu unikalności kodów,
+    kolizje kodów oraz liczniki. Pozwala zweryfikować produkcję po redeployu."""
+    idx = await db.elements.index_information()
+    pipe = [
+        {"$match": {"status": {"$ne": "zarchiwizowany"}}},
+        {"$group": {"_id": {"p": "$project_id", "k": "$kod_norm"},
+                    "n": {"$sum": 1}, "kody": {"$addToSet": "$kod"}}},
+        {"$match": {"n": {"$gt": 1}}},
+    ]
+    dups = []
+    async for g in db.elements.aggregate(pipe):
+        dups.append({"project_id": g["_id"]["p"], "kod_norm": g["_id"]["k"],
+                     "count": g["n"], "kody": g["kody"]})
+    return {
+        "unique_index_present": "uniq_element_kod_norm" in idx,
+        "index_names": list(idx.keys()),
+        "kod_norm_backfilled": (await db.elements.count_documents({"kod_norm": {"$exists": False}})) == 0,
+        "duplicate_code_groups": dups,
+        "counts": {
+            "users": await db.users.count_documents({}),
+            "users_active": await db.users.count_documents({"status": "aktywny"}),
+            "admins_active": await db.users.count_documents({"rola": "admin", "status": "aktywny"}),
+            "projects": await db.projects.count_documents({}),
+            "elements": await db.elements.count_documents({}),
+            "elements_active": await db.elements.count_documents({"status": {"$ne": "zarchiwizowany"}}),
+            "reports": await db.daily_reports.count_documents({}),
+        },
+    }
+
+
 @api.get("/users")
 async def list_users(status: Optional[str] = None, admin: dict = Depends(require("admin"))):
     q = {"company_id": COMPANY_ID}
@@ -638,8 +678,8 @@ class AdminSetPwIn(BaseModel):
 @api.post("/users/{user_id}/reset-password")
 async def admin_reset_password(user_id: str, body: AdminSetPwIn, admin: dict = Depends(require("admin"))):
     """Admin sets/resets any user's password; user must change it on next login."""
-    if len(body.nowe) < 14:
-        raise HTTPException(422, "Hasło musi mieć min. 14 znaków / Password min 14 chars")
+    if len(body.nowe) < PASSWORD_MIN:
+        raise HTTPException(422, f"Hasło musi mieć min. {PASSWORD_MIN} znaków / Password min {PASSWORD_MIN} chars")
     u = await db.users.find_one({"id": user_id})
     if not u:
         raise HTTPException(404, "Nie znaleziono")
@@ -1963,6 +2003,11 @@ async def startup():
         await db.elements.drop_index("uniq_element_kod")
     except Exception:
         pass
+    try:
+        # Drop old partial index if its filter differs (C1) so it can be rebuilt.
+        await db.elements.drop_index("uniq_element_kod_norm")
+    except Exception:
+        pass
     # Backfill kod_norm for legacy rows BEFORE building the unique index (G8).
     async for el in db.elements.find({"kod_norm": {"$exists": False}}, {"id": 1, "kod": 1}):
         await db.elements.update_one({"id": el["id"]}, {"$set": {"kod_norm": norm_kod(el.get("kod", ""))}})
@@ -1970,7 +2015,7 @@ async def startup():
         await db.elements.create_index(
             [("company_id", 1), ("project_id", 1), ("kod_norm", 1)],
             unique=True, name="uniq_element_kod_norm",
-            partialFilterExpression={"status": {"$in": ["do_wykonania", "zgloszony_gotowy", "odebrany"]}},
+            partialFilterExpression={"status": {"$in": ACTIVE_ELEMENT_STATUSES}},
         )
     except Exception as e:
         logger.warning(f"element unique index skipped: {e}")

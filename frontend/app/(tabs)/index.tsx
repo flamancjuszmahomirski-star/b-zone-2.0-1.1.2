@@ -167,6 +167,7 @@ export default function Dashboard() {
                     <Metric testID="metric-issues" icon="alert-circle" value={data.openIssues || 0} label={t("open_issues")} onPress={() => router.push("/(tabs)/issues")} />
                     <Metric testID="metric-deliveries" icon="cube" value={t("deliveries")} label="" onPress={() => router.push("/deliveries")} />
                   </View>
+                  <Button title={t("new_report")} icon="add-circle" onPress={() => router.push("/report-new")} testID="foreman-new-report" />
                   <Text style={styles.sectionTitle}>{t("who_on_site")}</Text>
                   {(data.crew || []).length === 0 ? (
                     <EmptyState icon="people-outline" message={t("empty_hours")} />

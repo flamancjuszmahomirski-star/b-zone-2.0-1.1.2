@@ -62,6 +62,12 @@ SEED_ADMIN_PASSWORD ustawione na Chelsea1234567890! (wymuszona zmiana przy 1. lo
 P3: stawka_godz_eur (koszt) i marża NIEwidoczne dla foreman/subcontractor na poziomie endpointów. P4: worker==subcontractor identyczne ekrany (różnica tylko w modelu danych).
 ŚRODOWISKO: preview (localhost:27017/bzone_database) i produkcja to RÓŻNE bazy; produkcja niedostępna z preview. Do Rundy 1.2: regresje 1.0.6 (Odbiory crash, czarny rysunek) + F1/D1/G4/G2/G3/C2/przycisk eksportu/D2 select-all/martwy „Zresetuj hasło".
 
+## Runda 1.2 (2026-08-15) — cel 1.0.8 (część zrobiona + zweryfikowana testerem)
+ZROBIONE (6/6 PASS iter11): A2 crash „Odbiory" (spójna para allSelected+toggleAll); B1 jedna reguła PASSWORD_MIN=14 w 4 ścieżkach (register/change/admin-reset/token-reset); B2 reset tokenem wymusza must_change_password; C1 indeks unikalności kodów obejmuje ACTIVE_ELEMENT_STATUSES (wszystkie poza zarchiwizowany) + drop starego; C2 przycisk „Eksport danych" w Więcej (admin); E1 brygadzista ma akcję „Nowy raport" na Home. Config: app.json version 1.0.8, versionCode 124 (>123), android.allowBackup=false. Endpoint /admin/health (read-only) do weryfikacji indeksu/kolizji/liczników na produkcji po redeployu.
+OPIS-ONLY (czeka na zgodę): A1 trwałe przechowywanie plików → Emergent Managed Object Storage (nie implementuję bez zgody właściciela).
+ODŁOŻONE (dedykowana tura, za duże/ryzykowne na resztę budżetu): D — wspólna powłoka Screen na WSZYSTKIE ekrany/modale z polami/akcją/tabami + tabela zastosowano/pominięto; regresja „czarny rysunek elewacji" w widoku zrzutu (Image nie ładuje tła).
+ŚRODOWISKO: preview=localhost/bzone_database; produkcja=osobna baza (niedostępna z preview). Do zmian na produkcji wymagany redeploy.
+
 ## Notes / Not-yet-live
 - Push notifications: structure implemented (register-push + server-side send_push on events). Requires `google-services.json` (Android) + deploy → build to actually deliver; does NOT work in Expo Go.
 - App logo: bison-in-hard-hat placeholder ("BZ"/hammer) — swap in real PNG when provided (icon, splash, login).

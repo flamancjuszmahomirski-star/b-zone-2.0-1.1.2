@@ -1,5 +1,5 @@
 import React from "react";
-import { View, Text, StyleSheet, ScrollView, Pressable } from "react-native";
+import { View, Text, StyleSheet, ScrollView, Pressable, Platform } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
@@ -8,15 +8,38 @@ import { useI18n } from "@/src/i18n/I18nContext";
 import { useAuth } from "@/src/context/AuthContext";
 import { AppBar } from "@/src/components/AppBar";
 import { Avatar } from "@/src/components/Avatar";
+import { api, API, authHeader } from "@/src/api/client";
+import { useToast } from "@/src/components/Toast";
 
-type Item = { icon: keyof typeof Ionicons.glyphMap; label: string; route: string; testID: string };
+type Item = { icon: keyof typeof Ionicons.glyphMap; label: string; route?: string; testID: string; action?: () => void };
 
 export default function More() {
   const { t } = useI18n();
   const { user } = useAuth();
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const toast = useToast();
   const role = user?.rola;
+
+  const doExport = async () => {
+    try {
+      const headers = await authHeader();
+      const res = await fetch(`${API}/export`, { headers });
+      if (!res.ok) throw new Error("export");
+      if (Platform.OS === "web") {
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url; a.download = "bzone-export.zip"; a.click();
+        URL.revokeObjectURL(url);
+      }
+      const info: any = await api("/export/last");
+      const when = info?.last_export_at ? String(info.last_export_at).slice(0, 16).replace("T", " ") : "";
+      toast.show(`${t("export_done")}${when ? " · " + when : ""}`);
+    } catch {
+      toast.show(t("error_generic"), "error");
+    }
+  };
 
   const common: Item[] = [
     { icon: "notifications-outline", label: t("notifications"), route: "/notifications", testID: "more-notifications" },
@@ -28,6 +51,7 @@ export default function More() {
     { icon: "business-outline", label: t("projects"), route: "/projects", testID: "more-projects" },
     { icon: "people-outline", label: t("user_management"), route: "/users", testID: "more-users" },
     { icon: "pricetags-outline", label: t("element_types"), route: "/element-types", testID: "more-element-types" },
+    { icon: "download-outline", label: t("export_data"), testID: "more-export", action: doExport },
     { icon: "list-outline", label: t("audit_log"), route: "/audit", testID: "more-audit" },
     { icon: "archive-outline", label: t("archive_view"), route: "/archive", testID: "more-archive" },
   ];
@@ -48,7 +72,7 @@ export default function More() {
         </Pressable>
 
         {items.map((it) => (
-          <Pressable key={it.route} testID={it.testID} onPress={() => router.push(it.route as any)} style={styles.row}>
+          <Pressable key={it.testID} testID={it.testID} onPress={() => (it.action ? it.action() : router.push(it.route as any))} style={styles.row}>
             <View style={styles.iconWrap}>
               <Ionicons name={it.icon} size={22} color={colors.brand} />
             </View>

@@ -2,7 +2,7 @@
   "expo": {
     "name": "B-ZONE 2.0",
     "slug": "frontend",
-    "version": "1.0.1",
+    "version": "1.0.8",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "bzone",
@@ -31,7 +31,9 @@
         "READ_MEDIA_IMAGES",
         "ACCESS_FINE_LOCATION",
         "ACCESS_COARSE_LOCATION"
-      ]
+      ],
+      "versionCode": 124,
+      "allowBackup": false
     },
     "web": {
       "bundler": "metro",

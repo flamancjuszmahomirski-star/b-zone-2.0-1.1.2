@@ -32,7 +32,8 @@ export default function Receipts() {
   const toggle = (id: string) => setSel((s) => ({ ...s, [id]: !s[id] }));
   const allIds = items.map((i) => i.id);
   const selCount = Object.values(sel).filter(Boolean).length;
-  const selectAll = () => setSel(Object.fromEntries(allIds.map((id) => [id, true])));
+  const allSelected = allIds.length > 0 && selCount === allIds.length;
+  const toggleAll = () => setSel(allSelected ? {} : Object.fromEntries(allIds.map((id) => [id, true])));
 
   const receive = async () => {
     const ids = allIds.filter((id) => sel[id]);
