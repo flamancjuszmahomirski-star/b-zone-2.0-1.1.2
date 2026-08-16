@@ -2,7 +2,7 @@
   "expo": {
     "name": "B-ZONE 2.0",
     "slug": "frontend",
-    "version": "1.0.9",
+    "version": "1.2.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "bzone",
@@ -38,7 +38,7 @@
         "android.permission.WRITE_EXTERNAL_STORAGE"
       ],
       "softwareKeyboardMode": "adjustResize",
-      "versionCode": 130,
+      "versionCode": 132,
       "allowBackup": false
     },
     "web": {

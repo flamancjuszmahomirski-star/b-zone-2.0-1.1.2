@@ -1,6 +1,8 @@
-import React, { useState, useCallback, useRef } from "react";
-import { View, Text, StyleSheet, Pressable, Modal, TextInput, ScrollView, ActivityIndicator, Dimensions, KeyboardAvoidingView } from "react-native";
-import { KeyboardStickyView } from "react-native-keyboard-controller";
+// R2: mobile view = READ + report/receive selection ONLY. The geometry editor is
+// ABSENT on the phone (no route, no mode, no entry) — it exists exclusively on
+// web for the admin role (GeometryEditor). Enforced also on the backend.
+import React, { useState, useCallback } from "react";
+import { View, Text, StyleSheet, Pressable, Modal, Dimensions, Platform } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Image } from "expo-image";
 import { Ionicons } from "@expo/vector-icons";
@@ -13,43 +15,66 @@ import { useAuth } from "@/src/context/AuthContext";
 import { api, fileUrl } from "@/src/api/client";
 import { Header } from "@/src/components/Screen";
 import { Button } from "@/src/components/Button";
-import { SelectField, SelectSheet } from "@/src/components/SelectSheet";
 import { LoadingState } from "@/src/components/States";
-import { ConfirmModal } from "@/src/components/ConfirmModal";
 import { useToast } from "@/src/components/Toast";
-import { useDelayReasons } from "@/src/hooks/useDelayReasons";
+import { GeometryEditor } from "@/src/components/web/GeometryEditor";
 
 const SCREEN = Dimensions.get("window");
 
+// G: rectangle as a plain View — constant visual border width (independent of zoom),
+// ~30% translucent fill, label hidden below a zoom threshold, ≥48dp touch target.
+const RectShape = React.memo(function RectShape({ el, baseW, baseH, jsScale, isSel, isFocus, onPress }: any) {
+  const pts = el.geometria_json?.punkty || [];
+  const xs = pts.map((p: any) => p.x), ys = pts.map((p: any) => p.y);
+  const x = Math.min(...xs), y = Math.min(...ys);
+  const w = Math.max(...xs) - x, h = Math.max(...ys) - y;
+  const c = elementStatusColor(el.status);
+  const borderW = Math.max(1, 2 / jsScale); // constant on-screen thickness
+  const screenW = w * baseW * jsScale, screenH = h * baseH * jsScale;
+  // 48dp minimum touch target (gloves): extend hit area in local (pre-scale) units.
+  const slopX = screenW < 48 ? (48 - screenW) / (2 * jsScale) : 0;
+  const slopY = screenH < 48 ? (48 - screenH) / (2 * jsScale) : 0;
+  const showLabel = screenW > 34; // zoom threshold for labels; shape always rendered
+  return (
+    <Pressable
+      testID={`shape-${el.id}`}
+      onPress={() => onPress(el)}
+      hitSlop={{ left: slopX, right: slopX, top: slopY, bottom: slopY }}
+      style={[styles.rect, {
+        left: x * baseW, top: y * baseH, width: w * baseW, height: h * baseH,
+        borderWidth: isFocus ? borderW + 2 / jsScale : isSel ? borderW + 1 / jsScale : borderW,
+        borderColor: isSel || isFocus ? "#fff" : c,
+        backgroundColor: c + "4D",
+        zIndex: isFocus ? 10 : undefined,
+      }]}
+    >
+      {showLabel && <Text style={styles.rectLabel} numberOfLines={1}>{el.kod}</Text>}
+    </Pressable>
+  );
+});
+
 export default function ViewCanvas() {
   const { id, focus } = useLocalSearchParams<{ id: string; focus?: string }>();
-  const { t, lang } = useI18n();
+  const { t } = useI18n();
   const { user } = useAuth();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const toast = useToast();
-  const canEdit = user?.rola === "admin" || user?.rola === "foreman";
+  const canReceive = user?.rola === "admin" || user?.rola === "foreman";
+  // R2 (D): editor exists ONLY on web AND ONLY for admin.
+  const isWebAdmin = Platform.OS === "web" && user?.rola === "admin";
 
   const [view, setView] = useState<any>(null);
   const [elements, setElements] = useState<any[]>([]);
   const [types, setTypes] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [mode, setMode] = useState<"view" | "edit" | "receive">("view");
+  const [mode, setMode] = useState<"view" | "receive">("view");
   const [selected, setSelected] = useState<Record<string, boolean>>({});
   const [detail, setDetail] = useState<any>(null);
-  const [typePicker, setTypePicker] = useState(false);
-  // A1: lost/unloadable background image → clear message instead of a black canvas.
   const [imgError, setImgError] = useState(false);
-  // H7: element highlighted via ?focus= param.
   const [focusId, setFocusId] = useState<string | null>(null);
-
-  // add/series form
-  const [pendingPos, setPendingPos] = useState<{ x: number; y: number } | null>(null);
-  const [kod, setKod] = useState("");
-  const [typId, setTypId] = useState<string | null>(null);
-  const [series, setSeries] = useState(false);
-  const [prefix, setPrefix] = useState("");
-  const [nextNum, setNextNum] = useState(1);
+  // JS-side zoom mirror (updated at gesture end) for constant border/labels/hit areas.
+  const [jsScale, setJsScale] = useState(1);
 
   const scale = useSharedValue(1);
   const savedScale = useSharedValue(1);
@@ -67,7 +92,8 @@ export default function ViewCanvas() {
       setView(v); setElements(v.elementy || []); setTypes(ty2);
       const bh = v.szerokosc && v.wysokosc ? SCREEN.width * (v.wysokosc / v.szerokosc) : SCREEN.width * 0.75;
       if (v.szerokosc && v.wysokosc) setBaseH(bh);
-      // H7: center + zoom on the focused element, highlight it and open its detail.
+      // H7: center + zoom on the focused element (works for points AND rectangles —
+      // pozycja_x/y is always the shape center).
       if (focus) {
         const fel = (v.elementy || []).find((e: any) => e.id === focus);
         if (fel) {
@@ -78,6 +104,7 @@ export default function ViewCanvas() {
           scale.value = withTiming(s); savedScale.value = s;
           tx.value = withTiming(txv); stx.value = txv;
           ty.value = withTiming(tyv); sty.value = tyv;
+          setJsScale(s);
           setDetail(fel);
         }
       }
@@ -86,48 +113,25 @@ export default function ViewCanvas() {
   }, [id, focus]);
   useFocusEffect(useCallback(() => { setLoading(true); load(); }, [load]));
 
-  const addAt = (relX: number, relY: number) => {
-    if (mode !== "edit") return;
-    if (series) {
-      // Series: skip any codes already taken (whole-range guard) before saving.
-      let n = nextNum;
-      const existing = new Set(elements.map((e) => e.kod));
-      while (existing.has(`${prefix}${n}`)) n += 1;
-      const code = `${prefix}${n}`;
-      api(`/views/${id}/elements`, { method: "POST", body: { kod: code, typ_id: typId, opis: "", pozycja_x: relX, pozycja_y: relY } })
-        .then((el) => { setElements((p) => [...p, el]); setNextNum(n + 1); })
-        .catch((e) => toast.show(e?.status === 409 ? t("code_taken") : (e.message || t("error_generic")), "error"));
-    } else {
-      setPendingPos({ x: relX, y: relY }); setKod("");
-    }
-  };
+  const syncScale = (v: number) => setJsScale(v);
 
-  const saveElement = async () => {
-    if (!pendingPos || !kod.trim()) return;
-    try {
-      const el = await api(`/views/${id}/elements`, { method: "POST", body: { kod: kod.trim(), typ_id: typId, opis: "", pozycja_x: pendingPos.x, pozycja_y: pendingPos.y } });
-      setElements((p) => [...p, el]); setPendingPos(null); setKod(""); toast.show(t("saved"));
-    } catch (e: any) { toast.show(e?.status === 409 ? t("code_taken") : (e.message || t("error_generic")), "error"); }
-  };
-
-  const tapGesture = Gesture.Tap().maxDuration(250).onEnd((e) => {
-    const relX = e.x / baseW;
-    const relY = e.y / baseH;
-    if (relX >= 0 && relX <= 1 && relY >= 0 && relY <= 1) runOnJS(addAt)(relX, relY);
-  });
   const pinch = Gesture.Pinch()
-    .onUpdate((e) => { scale.value = Math.max(1, Math.min(4, savedScale.value * e.scale)); })
-    .onEnd(() => { savedScale.value = scale.value; if (scale.value <= 1) { scale.value = withTiming(1); tx.value = withTiming(0); ty.value = withTiming(0); stx.value = 0; sty.value = 0; } });
+    .onUpdate((e) => { scale.value = Math.max(1, Math.min(6, savedScale.value * e.scale)); })
+    .onEnd(() => {
+      savedScale.value = scale.value;
+      if (scale.value <= 1) { scale.value = withTiming(1); tx.value = withTiming(0); ty.value = withTiming(0); stx.value = 0; sty.value = 0; }
+      runOnJS(syncScale)(Math.max(1, scale.value));
+    });
   const pan = Gesture.Pan().minPointers(scale.value > 1 ? 1 : 2)
     .onUpdate((e) => { tx.value = stx.value + e.translationX; ty.value = sty.value + e.translationY; })
     .onEnd(() => { stx.value = tx.value; sty.value = ty.value; });
-  const composed = Gesture.Simultaneous(pinch, pan, tapGesture);
+  const composed = Gesture.Simultaneous(pinch, pan);
 
   const animStyle = useAnimatedStyle(() => ({
     transform: [{ translateX: tx.value }, { translateY: ty.value }, { scale: scale.value }],
   }));
 
-  const onMarkerPress = (el: any) => {
+  const onShapePress = (el: any) => {
     if (mode === "receive") {
       if (el.status !== "zgloszony_gotowy") { toast.show(t("st_zgloszony_gotowy"), "info"); return; }
       setSelected((s) => ({ ...s, [el.id]: !s[el.id] }));
@@ -145,12 +149,6 @@ export default function ViewCanvas() {
     } catch (e: any) { toast.show(e.message || t("error_generic"), "error"); }
   };
 
-  const deleteElement = async () => {
-    if (!detail) return;
-    try { const r: any = await api(`/elements/${detail.id}`, { method: "DELETE" }); toast.show(r.message || t("saved")); setDetail(null); load(); }
-    catch (e: any) { toast.show(e.message || t("error_generic"), "error"); }
-  };
-
   if (loading) return <View style={styles.screen}><Header title={t("view")} back /><LoadingState /></View>;
   if (!view) return <View style={styles.screen}><Header title={t("view")} back /></View>;
 
@@ -161,13 +159,24 @@ export default function ViewCanvas() {
   };
   const selCount = Object.values(selected).filter(Boolean).length;
 
+  // R2 (D/E): web + admin → mouse/keyboard geometry editor instead of the touch canvas.
+  if (isWebAdmin) {
+    return (
+      <View style={styles.screen}>
+        <Header title={view.nazwa} back />
+        <View style={styles.legend}>
+          <Legend color={colors.muted} label={`${t("st_do_wykonania")} ${counts.todo}`} />
+          <Legend color={colors.warning} label={`${t("st_zgloszony_gotowy")} ${counts.ready}`} />
+          <Legend color={colors.success} label={`${t("st_odebrany")} ${counts.recv}`} />
+        </View>
+        <GeometryEditor view={view} elements={elements} types={types} reload={load} />
+      </View>
+    );
+  }
+
   return (
     <View style={styles.screen}>
-      <Header title={view.nazwa} back right={canEdit ? (
-        <Pressable testID="toggle-edit" onPress={() => { setMode(mode === "edit" ? "view" : "edit"); setSeries(false); }} hitSlop={8}>
-          <Ionicons name={mode === "edit" ? "checkmark-done" : "create-outline"} size={24} color={mode === "edit" ? colors.success : colors.brand} />
-        </Pressable>
-      ) : undefined} />
+      <Header title={view.nazwa} back />
 
       <View style={styles.legend}>
         <Legend color={colors.muted} label={`${t("st_do_wykonania")} ${counts.todo}`} />
@@ -193,6 +202,12 @@ export default function ViewCanvas() {
               />
             )}
             {elements.map((el) => {
+              if (el.geometria_typ === "prostokat" && el.geometria_json?.punkty?.length === 4) {
+                return (
+                  <RectShape key={el.id} el={el} baseW={baseW} baseH={baseH} jsScale={jsScale}
+                    isSel={!!selected[el.id]} isFocus={el.id === focusId} onPress={onShapePress} />
+                );
+              }
               const c = elementStatusColor(el.status);
               const isSel = selected[el.id];
               const isFocus = el.id === focusId;
@@ -200,7 +215,7 @@ export default function ViewCanvas() {
                 <Pressable
                   key={el.id}
                   testID={`marker-${el.id}`}
-                  onPress={() => onMarkerPress(el)}
+                  onPress={() => onShapePress(el)}
                   style={[styles.marker, {
                     left: el.pozycja_x * baseW - 12, top: el.pozycja_y * baseH - 12,
                     backgroundColor: c,
@@ -217,28 +232,7 @@ export default function ViewCanvas() {
         </GestureDetector>
       </View>
 
-      {mode === "edit" && (
-        // D: bottom edit bar must ride on top of the keyboard (Android edge-to-edge
-        // ignores adjustResize, so plain padding is not enough).
-        <KeyboardStickyView offset={{ closed: 0, opened: insets.bottom }}>
-          <View style={[styles.editBar, { paddingBottom: insets.bottom + spacing.sm }]}>
-            <Pressable testID="series-toggle" onPress={() => setSeries((s) => !s)} style={[styles.seriesChip, series && styles.seriesChipActive]}>
-              <Ionicons name="layers-outline" size={16} color={series ? "#fff" : colors.brand} />
-              <Text style={[styles.seriesText, series && { color: "#fff" }]}>{t("series_mode")}</Text>
-            </Pressable>
-            {series ? (
-              <View style={styles.seriesForm}>
-                <TextInput testID="series-prefix" value={prefix} onChangeText={setPrefix} placeholder={t("series_prefix")} placeholderTextColor={colors.muted} style={styles.seriesInput} />
-                <TextInput testID="series-start" value={String(nextNum)} onChangeText={(v) => setNextNum(parseInt(v) || 1)} keyboardType="number-pad" style={[styles.seriesInput, { width: 70 }]} />
-              </View>
-            ) : (
-              <Text style={styles.editHint}>{t("tap_to_place")}</Text>
-            )}
-          </View>
-        </KeyboardStickyView>
-      )}
-
-      {canEdit && mode !== "edit" && (
+      {canReceive && (
         <View style={[styles.footer, { paddingBottom: insets.bottom + spacing.sm }]}>
           {mode === "receive" ? (
             <>
@@ -251,23 +245,6 @@ export default function ViewCanvas() {
         </View>
       )}
 
-      {/* add element modal */}
-      <Modal visible={!!pendingPos} transparent statusBarTranslucent navigationBarTranslucent animationType="fade" onRequestClose={() => setPendingPos(null)}>
-        <KeyboardAvoidingView behavior="padding" style={{ flex: 1 }}>
-        <Pressable style={styles.backdrop} onPress={() => setPendingPos(null)}>
-          <Pressable style={styles.sheet} onPress={() => {}}>
-            <Text style={styles.sheetTitle}>{t("add_element")}</Text>
-            <TextInput testID="element-code" value={kod} onChangeText={setKod} placeholder={t("code")} placeholderTextColor={colors.muted} style={styles.input} />
-            <SelectField testID="element-type" value={types.find((x) => x.id === typId)?.[lang === "pl" ? "nazwa_pl" : "nazwa_en"]} placeholder={t("element_type")} onPress={() => setTypePicker(true)} />
-            <View style={{ flexDirection: "row", gap: spacing.md }}>
-              <Button title={t("cancel")} onPress={() => setPendingPos(null)} variant="secondary" style={{ flex: 1 }} />
-              <Button title={t("save")} onPress={saveElement} style={{ flex: 1 }} testID="save-element" />
-            </View>
-          </Pressable>
-        </Pressable>
-        </KeyboardAvoidingView>
-      </Modal>
-
       {/* element detail sheet */}
       <Modal visible={!!detail} transparent animationType="slide" onRequestClose={() => setDetail(null)}>
         <Pressable style={styles.backdrop} onPress={() => setDetail(null)}>
@@ -279,14 +256,9 @@ export default function ViewCanvas() {
             </View>
             <Text style={styles.detailStatus}>{t(`st_${detail?.status}` as any) || detail?.status}</Text>
             <Button title={t("timeline")} icon="time-outline" variant="secondary" onPress={() => { const d = detail; setDetail(null); router.push(`/element/${d.id}`); }} testID="element-timeline" />
-            {canEdit && (
-              <Button title={t("delete")} icon="trash-outline" variant="danger" onPress={deleteElement} testID="delete-element" />
-            )}
           </Pressable>
         </Pressable>
       </Modal>
-
-      <SelectSheet visible={typePicker} title={t("element_type")} options={types.map((x) => ({ value: x.id, label: x[lang === "pl" ? "nazwa_pl" : "nazwa_en"] }))} selected={typId} onSelect={setTypId} onClose={() => setTypePicker(false)} />
     </View>
   );
 }
@@ -309,21 +281,13 @@ const styles = StyleSheet.create({
   canvasWrap: { flex: 1, backgroundColor: "#0A0A0A", overflow: "hidden", justifyContent: "center" },
   marker: { position: "absolute", minWidth: 24, height: 24, borderRadius: 12, alignItems: "center", justifyContent: "center", paddingHorizontal: 4 },
   markerText: { color: "#fff", fontSize: 9, fontWeight: "800" },
-  editBar: { backgroundColor: colors.surfaceSecondary, borderTopWidth: 1, borderTopColor: colors.divider, padding: spacing.md, gap: spacing.sm, flexDirection: "row", alignItems: "center", flexWrap: "wrap" },
-  seriesChip: { flexDirection: "row", alignItems: "center", gap: 4, borderWidth: 1, borderColor: colors.brand, borderRadius: 999, paddingHorizontal: spacing.md, paddingVertical: 6 },
-  seriesChipActive: { backgroundColor: colors.brand },
-  seriesText: { color: colors.brand, fontWeight: "700", fontSize: font.sm },
-  seriesForm: { flexDirection: "row", gap: spacing.sm, flex: 1 },
-  seriesInput: { flex: 1, backgroundColor: colors.surface, borderRadius: radius.sm, borderWidth: 1, borderColor: colors.border, paddingHorizontal: spacing.sm, color: colors.onSurface, minHeight: 40 },
-  editHint: { color: colors.muted, fontSize: font.sm, flex: 1 },
+  rect: { position: "absolute", alignItems: "center", justifyContent: "center" },
+  rectLabel: { color: "#fff", fontSize: 9, fontWeight: "800", textShadowColor: "#000", textShadowRadius: 3 },
   imgFallback: { alignItems: "center", justifyContent: "center", gap: spacing.sm, backgroundColor: colors.surfaceSecondary },
   imgFallbackTitle: { color: colors.onSurface, fontSize: font.lg, fontWeight: "800" },
   imgFallbackText: { color: colors.muted, fontSize: font.sm, textAlign: "center", paddingHorizontal: spacing.xl },
   footer: { flexDirection: "row", gap: spacing.md, padding: spacing.lg, borderTopWidth: 1, borderTopColor: colors.divider, backgroundColor: colors.surface },
   backdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.6)", justifyContent: "center", padding: spacing.xl },
-  sheet: { backgroundColor: colors.surfaceTertiary, borderRadius: radius.lg, padding: spacing.xl, gap: spacing.lg },
-  sheetTitle: { color: colors.onSurface, fontSize: font.xl, fontWeight: "800" },
-  input: { backgroundColor: colors.surfaceSecondary, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, padding: spacing.md, color: colors.onSurface, fontSize: font.lg },
   detailSheet: { position: "absolute", bottom: 0, left: 0, right: 0, backgroundColor: colors.surfaceTertiary, borderTopLeftRadius: radius.lg, borderTopRightRadius: radius.lg, padding: spacing.xl, paddingBottom: spacing.xxxl, gap: spacing.md },
   handle: { width: 40, height: 4, borderRadius: 2, backgroundColor: colors.borderStrong, alignSelf: "center" },
   detailHead: { flexDirection: "row", alignItems: "center", gap: spacing.sm },

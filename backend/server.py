@@ -1723,6 +1723,8 @@ class ElementIn(BaseModel):
     opis: Optional[str] = ""
     pozycja_x: float  # 0..1 relative to view
     pozycja_y: float
+    geometria_typ: Literal["punkt", "prostokat"] = "punkt"
+    geometria_json: Optional[dict] = None
 
 
 class ElementUpdateIn(BaseModel):
@@ -1731,6 +1733,28 @@ class ElementUpdateIn(BaseModel):
     opis: Optional[str] = None
     pozycja_x: Optional[float] = None
     pozycja_y: Optional[float] = None
+    geometria_typ: Optional[Literal["punkt", "prostokat"]] = None
+    geometria_json: Optional[dict] = None
+
+
+def _clamp01(v: float) -> float:
+    return max(0.0, min(1.0, float(v)))
+
+
+def normalize_geometry(geometria_typ: str, geometria_json: Optional[dict],
+                       px: float, py: float) -> tuple:
+    """R2: validate relative geometry (0..1) and recompute pozycja_x/y = shape center.
+    NOTE: geometry is NEVER used to compute areas/lengths/values (perspective drawings)."""
+    if geometria_typ == "prostokat":
+        pts = (geometria_json or {}).get("punkty") or []
+        if len(pts) != 4:
+            raise HTTPException(422, "Prostokąt wymaga 4 narożników / Rectangle requires 4 corners")
+        pts = [{"x": _clamp01(p["x"]), "y": _clamp01(p["y"])} for p in pts]
+        cx = sum(p["x"] for p in pts) / 4.0
+        cy = sum(p["y"] for p in pts) / 4.0
+        return "prostokat", {"punkty": pts}, cx, cy
+    px, py = _clamp01(px), _clamp01(py)
+    return "punkt", {"punkty": [{"x": px, "y": py}]}, px, py
 
 
 class ReceiveIn(BaseModel):
@@ -1887,7 +1911,8 @@ async def list_project_elements(project_id: str, status: Optional[str] = None,
 
 
 @api.post("/views/{vid}/elements", status_code=201)
-async def create_element(vid: str, body: ElementIn, user: dict = Depends(require("admin", "foreman"))):
+async def create_element(vid: str, body: ElementIn, user: dict = Depends(require("admin"))):
+    # R2 (D/H): drawing/creating geometry is ADMIN-ONLY, enforced on the backend.
     view = await db.views.find_one({"id": vid})
     if not view:
         raise HTTPException(404, "Nie znaleziono widoku")
@@ -1899,17 +1924,160 @@ async def create_element(vid: str, body: ElementIn, user: dict = Depends(require
                                       "status": {"$ne": "zarchiwizowany"}})
     if dup:
         raise HTTPException(409, f"Kod '{kod}' jest już użyty w tym projekcie / Code already used")
+    g_typ, g_json, cx, cy = normalize_geometry(body.geometria_typ, body.geometria_json,
+                                               body.pozycja_x, body.pozycja_y)
     doc = {"id": new_id(), "company_id": COMPANY_ID, "view_id": vid,
            "folder_id": view["folder_id"], "project_id": view["project_id"],
            "kod": kod, "kod_norm": kn, "typ_id": body.typ_id, "opis": body.opis,
-           "pozycja_x": body.pozycja_x, "pozycja_y": body.pozycja_y,
+           "pozycja_x": cx, "pozycja_y": cy,
            "status": "do_wykonania", "zglosil_id": None, "zgloszony_at": None,
            "odebral_id": None, "odebrany_at": None, "ujete_w_rozliczeniu_id": None,
-           "geometria_typ": "punkt", "geometria_json": None,
+           "geometria_typ": g_typ, "geometria_json": g_json,
            "created_at": now_iso()}
     await db.elements.insert_one(doc)
     await _log_element(doc["id"], "utworzony", None, "do_wykonania", user["id"])
+    await audit(user["id"], "utworzenie_elementu", "element", doc["id"], after={"kod": kod, "geometria_typ": g_typ})
     return clean(doc)
+
+
+class ElementBatchIn(BaseModel):
+    elementy: List[ElementIn]
+
+
+@api.post("/views/{vid}/elements/batch", status_code=201)
+async def create_elements_batch(vid: str, body: ElementBatchIn, user: dict = Depends(require("admin"))):
+    """R2 F3: grid/linear duplication — creates a whole series atomically.
+    ALL codes are validated BEFORE any insert (hard unique index would abort mid-way).
+    One audit entry for the whole operation."""
+    view = await db.views.find_one({"id": vid})
+    if not view:
+        raise HTTPException(404, "Nie znaleziono widoku")
+    if not body.elementy:
+        raise HTTPException(422, "Pusta lista elementów / Empty batch")
+    if len(body.elementy) > 500:
+        raise HTTPException(422, "Max 500 elementów na operację / Max 500 per batch")
+    # full-series code validation BEFORE any write
+    taken, seen = [], set()
+    for e in body.elementy:
+        k = (e.kod or "").strip()
+        if not k:
+            raise HTTPException(422, "Kod jest wymagany / Code required")
+        kn = norm_kod(k)
+        if kn in seen:
+            taken.append(k)
+            continue
+        seen.add(kn)
+        ex = await db.elements.find_one({"project_id": view["project_id"], "kod_norm": kn,
+                                         "status": {"$ne": "zarchiwizowany"}})
+        if ex:
+            taken.append(k)
+    if taken:
+        raise HTTPException(409, f"Kody zajęte / Codes taken: {', '.join(taken[:20])}")
+    docs = []
+    for e in body.elementy:
+        g_typ, g_json, cx, cy = normalize_geometry(e.geometria_typ, e.geometria_json,
+                                                   e.pozycja_x, e.pozycja_y)
+        kod = e.kod.strip()
+        docs.append({"id": new_id(), "company_id": COMPANY_ID, "view_id": vid,
+                     "folder_id": view["folder_id"], "project_id": view["project_id"],
+                     "kod": kod, "kod_norm": norm_kod(kod), "typ_id": e.typ_id, "opis": e.opis,
+                     "pozycja_x": cx, "pozycja_y": cy,
+                     "status": "do_wykonania", "zglosil_id": None, "zgloszony_at": None,
+                     "odebral_id": None, "odebrany_at": None, "ujete_w_rozliczeniu_id": None,
+                     "geometria_typ": g_typ, "geometria_json": g_json, "created_at": now_iso()})
+    await db.elements.insert_many(docs)
+    for d in docs:
+        await _log_element(d["id"], "utworzony", None, "do_wykonania", user["id"])
+    await audit(user["id"], "powielanie_elementow", "view", vid,
+                after={"liczba": len(docs), "kody": [d["kod"] for d in docs[:30]]})
+    return {"created": [clean(d) for d in docs]}
+
+
+class GeometryUpdateItem(BaseModel):
+    id: str
+    geometria_typ: Literal["punkt", "prostokat"]
+    geometria_json: Optional[dict] = None
+    pozycja_x: float
+    pozycja_y: float
+
+
+class GeometryBatchIn(BaseModel):
+    updates: List[GeometryUpdateItem]
+
+
+@api.put("/elements/batch-geometry")
+async def update_geometry_batch(body: GeometryBatchIn, user: dict = Depends(require("admin"))):
+    """R2 F2/F4: move/resize/align/distribute/mirror + undo restores. Admin-only.
+    One audit entry per operation."""
+    if not body.updates:
+        raise HTTPException(422, "Pusta lista / Empty batch")
+    if len(body.updates) > 500:
+        raise HTTPException(422, "Max 500 elementów na operację / Max 500 per batch")
+    updated = 0
+    for u in body.updates:
+        el = await db.elements.find_one({"id": u.id})
+        if not el:
+            continue
+        g_typ, g_json, cx, cy = normalize_geometry(u.geometria_typ, u.geometria_json,
+                                                   u.pozycja_x, u.pozycja_y)
+        await db.elements.update_one({"id": u.id}, {"$set": {
+            "geometria_typ": g_typ, "geometria_json": g_json,
+            "pozycja_x": cx, "pozycja_y": cy}})
+        updated += 1
+    await audit(user["id"], "edycja_geometrii", "elements", "batch", after={"liczba": updated})
+    return {"updated": updated}
+
+
+class IdsIn(BaseModel):
+    ids: List[str]
+
+
+@api.post("/elements/batch-archive")
+async def archive_elements_batch(body: IdsIn, user: dict = Depends(require("admin"))):
+    """R2 F2 Delete: archive selection (soft delete, 'odebrany' included per A.3)."""
+    if not body.ids:
+        raise HTTPException(422, "Pusta lista / Empty batch")
+    archived = 0
+    for eid in body.ids:
+        el = await db.elements.find_one({"id": eid, "status": {"$ne": "zarchiwizowany"}})
+        if not el:
+            continue
+        await db.elements.update_one({"id": eid}, {"$set": {"status": "zarchiwizowany"}})
+        await _log_element(eid, "zarchiwizowany", el.get("status"), "zarchiwizowany", user["id"])
+        archived += 1
+    await audit(user["id"], "archiwizacja_elementow", "elements", "batch", after={"liczba": archived})
+    return {"archived": archived}
+
+
+class RestoreItem(BaseModel):
+    id: str
+    status: Literal["do_wykonania", "zgloszony_gotowy", "odebrany"]
+
+
+class RestoreBatchIn(BaseModel):
+    items: List[RestoreItem]
+
+
+@api.post("/elements/batch-restore")
+async def restore_elements_batch(body: RestoreBatchIn, user: dict = Depends(require("admin"))):
+    """R2 F2 undo of Delete: restore archived elements to their pre-archive status.
+    Codes may now collide with newer active elements — validate before restoring."""
+    if not body.items:
+        raise HTTPException(422, "Pusta lista / Empty batch")
+    restored = 0
+    for it in body.items:
+        el = await db.elements.find_one({"id": it.id, "status": "zarchiwizowany"})
+        if not el:
+            continue
+        clash = await db.elements.find_one({"project_id": el["project_id"], "kod_norm": el["kod_norm"],
+                                            "status": {"$ne": "zarchiwizowany"}, "id": {"$ne": it.id}})
+        if clash:
+            raise HTTPException(409, f"Kod '{el['kod']}' jest już zajęty — nie można przywrócić / Code taken, cannot restore")
+        await db.elements.update_one({"id": it.id}, {"$set": {"status": it.status}})
+        await _log_element(it.id, "przywrocony", "zarchiwizowany", it.status, user["id"])
+        restored += 1
+    await audit(user["id"], "przywrocenie_elementow", "elements", "batch", after={"liczba": restored})
+    return {"restored": restored}
 
 
 class SeriesValidateIn(BaseModel):
@@ -1941,6 +2109,19 @@ async def update_element(eid: str, body: ElementUpdateIn, user: dict = Depends(r
     if not el:
         raise HTTPException(404, "Nie znaleziono")
     upd = {k: v for k, v in body.model_dump().items() if v is not None}
+    # R2 (D/H): geometry fields are ADMIN-ONLY (foreman may still fix kod/typ/opis,
+    # e.g. the duplicate-repair screen).
+    geo_keys = {"geometria_typ", "geometria_json", "pozycja_x", "pozycja_y"}
+    if geo_keys & set(upd.keys()):
+        if user.get("rola") != "admin":
+            raise HTTPException(403, "Edycja geometrii tylko dla administratora / Geometry editing is admin-only")
+        g_typ, g_json, cx, cy = normalize_geometry(
+            upd.get("geometria_typ") or el.get("geometria_typ") or "punkt",
+            upd.get("geometria_json") or el.get("geometria_json"),
+            upd.get("pozycja_x", el.get("pozycja_x", 0.5)),
+            upd.get("pozycja_y", el.get("pozycja_y", 0.5)))
+        upd.update({"geometria_typ": g_typ, "geometria_json": g_json, "pozycja_x": cx, "pozycja_y": cy})
+        await audit(user["id"], "edycja_geometrii", "element", eid)
     if "kod" in upd:
         upd["kod"] = upd["kod"].strip()
         kn = norm_kod(upd["kod"])

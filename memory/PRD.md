@@ -93,3 +93,12 @@ ODŁOŻONE (dedykowana tura, za duże/ryzykowne na resztę budżetu): D — wsp�
 - Kontekst techniczny: edgeToEdgeEnabled + targetSdk 36 ⇒ Android ignoruje adjustResize; obsługa klawiatury musi być komponentowa (keyboard-controller 1.18.5, KeyboardProvider już w root)
 - app.json versionCode → 130 (binarka właściciela miała 129; EAS auto-inkrementuje — app.json to dolna granica)
 - Formularze (report/issue/delivery/project) już wcześniej na KeyboardStickyView — bez zmian
+
+## Runda 2 (v1.2.0, versionCode 132) — DONE 2026-06 — „Prostokąty i edytor pod mysz"
+- Model: geometria_typ punkt|prostokat, geometria_json.punkty (4 narożniki, rel 0..1), pozycja = środek (przeliczany serwerowo). ZAKAZY: zero liczenia powierzchni z geometrii, zero SVG/Skii, zero wielokątów.
+- Backend (wszystko admin-only): POST /views/{vid}/elements (już nie foreman!), POST .../elements/batch (walidacja serii PRZED insertem, 1 wpis audytu), PUT /elements/batch-geometry, POST /elements/batch-archive, POST /elements/batch-restore; PUT /elements/{eid}: pola geometrii tylko admin (foreman nadal kod/typ/opis).
+- Mobile view/[id].tsx: edytor CAŁKOWICIE usunięty z telefonu (view+receive only); prostokąty = View (stała ramka 2/scale, wypełnienie 30%, próg etykiet, hitSlop 48dp, React.memo).
+- Web+admin: GeometryEditor (src/components/web/GeometryEditor.tsx) — punkt/prostokąt 2 kliki+Shift+Esc, zaznaczanie klik/Ctrl/marquee, drag, uchwyty, Delete→archiwum, undo/redo 30 (siatka=1 krok), Ctrl+C/V, powielanie siatka/linia z podglądem i kodami serii (kolizje przed zapisem), 6 wyrównań+2 rozłożenia+ujednolicenie+2 lustra, siatka przyciągania % szer., zoom do kursora/pan/fit/100%/współrzędne.
+- Naprawione po drodze: remount toolbara (komponenty w renderze), stale closures (actionsRef), natywny img-drag porywający mysz (preventDefault + pointerEvents none).
+- Testy: iter14 (backend 9/9, frontend PASS) + pomiary px 4 przepływów myszy. Dane testowe: projekt TEST_R2_EDITOR (2 widoki, PERF 200).
+- Sprawozdanie: /app/memory/SPRAWOZDANIE-RUNDA-2.md
