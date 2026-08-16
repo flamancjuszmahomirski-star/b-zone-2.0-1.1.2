@@ -47,6 +47,8 @@ export function PhotoStrip({
     if (result.canceled || !result.assets?.[0]) return;
     const asset = result.assets[0];
     setUploading(true);
+    // E3: show the local thumbnail IMMEDIATELY, before compression/upload starts.
+    setPendingUri(asset.uri);
     try {
       const gps = await getGps();
       // Client-side compression BEFORE upload: resize longest side to 1920px, JPEG q0.6.

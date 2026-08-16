@@ -44,7 +44,10 @@ export default function More() {
         if (await Sharing.isAvailableAsync()) {
           await Sharing.shareAsync(dl.uri, { mimeType: "application/zip", dialogTitle: name });
         } else {
-          throw new Error("sharing-unavailable");
+          // No silent path: file IS downloaded (app cache) but can't be handed
+          // to the user on this device — say so explicitly and stop here.
+          toast.show(t("export_sharing_unavailable"), "error");
+          return;
         }
       }
       const info: any = await api("/export/last");

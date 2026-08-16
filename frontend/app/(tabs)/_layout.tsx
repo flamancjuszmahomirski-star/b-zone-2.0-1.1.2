@@ -1,5 +1,5 @@
 import React from "react";
-import { Tabs } from "expo-router";
+import { Tabs, Redirect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { Platform } from "react-native";
 import * as Haptics from "expo-haptics";
@@ -14,6 +14,10 @@ export default function TabsLayout() {
   const { user } = useAuth();
   const role = user?.rola;
   const isContractor = role === "contractor";
+
+  // B6: hard guard — a deep link straight into tabs must NOT bypass the forced
+  // password change (index.tsx/login.tsx redirects only cover normal entry).
+  if (user?.must_change_password) return <Redirect href="/change-password" />;
 
   const icon =
     (name: keyof typeof Ionicons.glyphMap, nameFocused: keyof typeof Ionicons.glyphMap) => {

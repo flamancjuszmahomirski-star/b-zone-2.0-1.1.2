@@ -1,4 +1,11 @@
-# SPRAWOZDANIE — RUNDA 1.3 (v1.0.9, versionCode 125)
+# SPRAWOZDANIE — RUNDA 1.3 (v1.0.9)
+
+## 0. Kontra-audit (poprawki przed publikacją)
+1. **E3**: potwierdzone — `setPendingUri(asset.uri)` zaginęło przy edycji; DODANE zaraz po wyborze zdjęcia, przed kompresją/uploadem. Ścieżka: zdjęcie → miniatura natychmiast + „Wysyłanie…" → po uploadzie nakładka znika (finalna miniatura z serwera).
+2. **B6 strażnik**: `(tabs)/_layout.tsx` → `if (user?.must_change_password) return <Redirect href="/change-password" />` — deep-link do dowolnej karty nie ominie przymusu.
+3. **C2b**: gałąź `Sharing.isAvailableAsync() === false` → jawny komunikat (decyzja: plik POZOSTAJE w cache aplikacji, komunikat błędu „Plik pobrano, ale to urządzenie nie obsługuje udostępniania — eksport pozostał w pamięci aplikacji. Użyj wersji web."). Żadna ścieżka nie kończy się ciszą.
+4. **versionCode — FAKTY**: poprzednia binarka = **126** (nie 125 jak deklarował raport — rozjazd wynika z auto-inkrementacji EAS przy buildzie). app.json ustawione na **127**, aby build był zawsze > zainstalowanego 126 (Android odmawia aktualizacji przy wersji ≤). Faktyczny versionCode zbudowanego APK odczytaj z panelu buildu po Publish — jeśli EAS auto-inkrementuje, może być wyższy niż 127; wartość z app.json jest wtedy tylko dolną granicą. Ja nie buduję binarki — build wykonuje platforma przy Publish.
+
 
 ## 1. Status punktów
 
