@@ -47,7 +47,7 @@ export default function ProjectDetail() {
 
   const openAddMember = async () => {
     try { setAllUsers(await api<any[]>("/users?status=aktywny")); setAddMember(true); }
-    catch { toast.show(t("error_generic"), "error"); }
+    catch (e: any) { toast.show(e.message || t("error_generic"), "error"); }
   };
   const addUser = async (uid: string) => {
     try { await api(`/projects/${id}/members`, { method: "POST", body: { user_id: uid, jest_glowny: false } }); toast.show(t("saved")); load(); }
@@ -55,12 +55,12 @@ export default function ProjectDetail() {
   };
   const removeMember = async (uid: string) => {
     try { await api(`/projects/${id}/members/${uid}`, { method: "DELETE" }); toast.show(t("saved")); load(); }
-    catch { toast.show(t("error_generic"), "error"); }
+    catch (e: any) { toast.show(e.message || t("error_generic"), "error"); }
   };
   const archive = async () => {
     setArchiveOpen(false);
     try { await api(`/projects/${id}/archive`, { method: "PATCH" }); await reload(); toast.show(t("saved")); router.back(); }
-    catch { toast.show(t("error_generic"), "error"); }
+    catch (e: any) { toast.show(e.message || t("error_generic"), "error"); }
   };
 
   if (loading) return <View style={styles.screen}><Header title={t("project")} back /><LoadingState /></View>;

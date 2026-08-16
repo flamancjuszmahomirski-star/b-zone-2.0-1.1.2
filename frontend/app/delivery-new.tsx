@@ -44,7 +44,7 @@ export default function DeliveryNew() {
       const up = await uploadFile(fileObj, "delivery_document");
       setAttachment({ url: up.url, name: up.name });
       toast.show(t("saved"));
-    } catch { toast.show(t("error_generic"), "error"); }
+    } catch (e: any) { toast.show(e.message || t("error_generic"), "error"); }
     finally { setUploading(false); }
   };
 

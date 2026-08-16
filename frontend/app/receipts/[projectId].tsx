@@ -2,7 +2,7 @@ import React, { useState, useCallback } from "react";
 import { View, Text, StyleSheet, ScrollView, Pressable, RefreshControl } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
-import { useLocalSearchParams, useFocusEffect } from "expo-router";
+import { useLocalSearchParams, useFocusEffect, useRouter } from "expo-router";
 import { colors, spacing, font, radius } from "@/src/theme/tokens";
 import { useI18n } from "@/src/i18n/I18nContext";
 import { api } from "@/src/api/client";
@@ -15,6 +15,7 @@ import { useToast } from "@/src/components/Toast";
 export default function Receipts() {
   const { projectId } = useLocalSearchParams<{ projectId: string }>();
   const { t } = useI18n();
+  const router = useRouter();
   const insets = useSafeAreaInsets();
   const toast = useToast();
   const [items, setItems] = useState<any[]>([]);
@@ -69,9 +70,19 @@ export default function Receipts() {
               <Text style={styles.group}>{g}</Text>
               {els.map((e) => (
                 <Pressable key={e.id} testID={`receipt-${e.id}`} onPress={() => toggle(e.id)}>
-                  <Card style={[styles.row, sel[e.id] && styles.rowSel]}>
+                  <Card style={StyleSheet.flatten([styles.row, sel[e.id] && styles.rowSel])}>
                     <Ionicons name={sel[e.id] ? "checkbox" : "square-outline"} size={22} color={sel[e.id] ? colors.brand : colors.muted} />
                     <Text style={styles.kod}>{e.kod}</Text>
+                    {/* H7: separate tap target — element detail → "Show on drawing".
+                        Row tap still toggles the checkbox (multi-select intact). */}
+                    <Pressable
+                      testID={`receipt-locate-${e.id}`}
+                      onPress={(ev) => { ev.stopPropagation(); router.push(`/element/${e.id}`); }}
+                      hitSlop={8}
+                      style={styles.locateBtn}
+                    >
+                      <Ionicons name="locate-outline" size={20} color={colors.brand} />
+                    </Pressable>
                     <View style={styles.readyDot} />
                   </Card>
                 </Pressable>
@@ -95,6 +106,7 @@ const styles = StyleSheet.create({
   row: { flexDirection: "row", alignItems: "center", gap: spacing.md, paddingVertical: spacing.md, minHeight: 48 },
   rowSel: { borderColor: colors.brand },
   kod: { color: colors.onSurface, fontSize: font.lg, fontWeight: "700", flex: 1 },
+  locateBtn: { minWidth: 44, minHeight: 44, alignItems: "center", justifyContent: "center" },
   readyDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: colors.warning },
   footer: { padding: spacing.lg, borderTopWidth: 1, borderTopColor: colors.divider, backgroundColor: colors.surface },
 });

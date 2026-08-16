@@ -3,12 +3,14 @@ import { Tabs } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { Platform } from "react-native";
 import * as Haptics from "expo-haptics";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { colors, spacing } from "@/src/theme/tokens";
 import { useI18n } from "@/src/i18n/I18nContext";
 import { useAuth } from "@/src/context/AuthContext";
 
 export default function TabsLayout() {
   const { t } = useI18n();
+  const insets = useSafeAreaInsets();
   const { user } = useAuth();
   const role = user?.rola;
   const isContractor = role === "contractor";
@@ -37,9 +39,11 @@ export default function TabsLayout() {
           backgroundColor: colors.surfaceSecondary,
           borderTopColor: colors.divider,
           borderTopWidth: 1,
-          height: Platform.OS === "ios" ? 88 : 66,
+          // D: base height + system inset so gesture/3-button nav bars never
+          // overlap the tabs on edge-to-edge Android or notched iOS.
+          height: (Platform.OS === "ios" ? 60 : 58) + insets.bottom,
           paddingTop: spacing.sm,
-          paddingBottom: Platform.OS === "ios" ? 28 : spacing.sm,
+          paddingBottom: insets.bottom + spacing.xs,
         },
         tabBarLabelStyle: { fontSize: 11, fontWeight: "600" },
       }}

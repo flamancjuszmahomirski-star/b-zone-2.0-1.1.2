@@ -15,6 +15,25 @@ export async function authHeader(): Promise<Record<string, string>> {
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
+// C4: FastAPI returns `detail` as a string for HTTPException, but as a LIST of
+// {loc, msg, type} objects for 422 validation errors. Render both readably
+// (never "[object Object]").
+export function detailToMessage(detail: any): string | undefined {
+  if (!detail) return undefined;
+  if (typeof detail === "string") return detail;
+  if (Array.isArray(detail)) {
+    const first = detail[0];
+    if (first && typeof first === "object") {
+      const field = Array.isArray(first.loc) ? String(first.loc[first.loc.length - 1]) : "";
+      const msg = first.msg || first.message || "";
+      return field && field !== "body" ? `${field}: ${msg}` : msg || undefined;
+    }
+    return String(first);
+  }
+  if (typeof detail === "object") return detail.msg || detail.message || JSON.stringify(detail);
+  return String(detail);
+}
+
 type Opts = { method?: string; body?: any; retries?: number };
 
 // JSON API call with token + simple retry for weak networks.
@@ -34,7 +53,7 @@ export async function api<T = any>(path: string, opts: Opts = {}): Promise<T> {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        const err: any = new Error(data.detail || "Request failed");
+        const err: any = new Error(detailToMessage(data.detail) || "Request failed");
         err.status = res.status;
         throw err;
       }
@@ -106,7 +125,7 @@ export async function transcribeAudio(
   try {
     const res = await fetch(`${API}/transcribe`, { method: "POST", headers, body: form, signal: controller.signal });
     const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data.detail || `Transcription failed (${res.status})`);
+    if (!res.ok) throw new Error(detailToMessage(data.detail) || `Transcription failed (${res.status})`);
     return data.text || "";
   } finally {
     clearTimeout(timer);

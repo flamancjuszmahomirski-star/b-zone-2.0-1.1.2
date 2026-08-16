@@ -62,7 +62,7 @@ export default function Login() {
             onChangeText={setEmail}
             autoCapitalize="none"
             keyboardType="email-address"
-            placeholder="jan.kowalski@firma.pl"
+            placeholder={t("email_placeholder")}
           />
           <TextField
             testID="login-password"

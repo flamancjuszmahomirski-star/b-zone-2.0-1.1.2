@@ -1,0 +1,54 @@
+{
+  "summary": "RUNDA 1.3 hardening verified. Backend: 9/10 PASS in /app/backend/tests/test_runda13_backend.py — A1 files+orphan-410, A2 partial project update (vat/dni/tryb preserved), B3 admin reset returns 16-char pw with must_change_password=True, E1b role guards (contractor→403 on /reports & /extra-hours, /register-push→401 without token), C4 malformed login returns 422 list-detail shape, B5 register rate limit returns 429 on 4th/h/IP — ALL PASS. ONE CRITICAL FAILURE: B5 LOGIN LOCKOUT IS NOT IMPLEMENTED — 6 consecutive wrong-password logins against a TEST user returned [401,401,401,401,401,401] and never 423 (no lockout counter, no lockout field, no lockout code path in server.py). Frontend: FRONTEND-1 forced /change-password redirect works (admin with must_change_password=True is force-navigated), FRONTEND-2 profile has 'Zmień hasło' row (testID=profile-change-password) and NO PIN/biometria mention, FRONTEND-3 Edit User modal shows 'Zresetuj hasło' entry (button text present but MISSING data-testid=user-reset-pw), FRONTEND-7 login with malformed email + short password shows readable Polish/English 422 message ('email: value is not a valid email address...') — no '[object Object]'. FRONTEND 4/5/6 (element→drawing H7, report edit H6.2, dashboard tiles) NOT executed due to context/time budget — recommend main-agent self-verify or dedicated follow-up test iteration. Admin must_change_password restored to True at end of run; TEST_ users archived.",
+  "backend_issues": {
+    "critical": [
+      {"endpoint": "POST /api/auth/login", "issue": "B5 login lockout NOT IMPLEMENTED. Spec: after 5 failed logins → 15-min lock returning HTTP 423. Actual: server.py:539-549 has NO failed-attempt counter, NO users.locked_until field, NO 423 code path. Grep '(lockout|423|failed_login|locked_until)' returns 0 hits in server.py. Test test_login_lockout_after_5_failed_attempts records statuses=[401,401,401,401,401,401] — never 423. This means the owner's account cannot actually be protected against brute-force in prod. Also means the docs/comments in test_credentials.md warning 'do not attempt failed logins on admin' currently describe intended behavior only, not actual behavior.", "priority": "CRITICAL"}
+    ],
+    "minor": [
+      {"endpoint": "POST /api/auth/register", "issue": "Rate-limit is stored ONLY in in-memory dict _register_hits (server.py:506) — resets on every backend restart / worker rotation and is not shared across replicas. Adequate for MVP anti-spam but not tamper-proof."},
+      {"endpoint": "POST /api/auth/login (soft-deleted user)", "issue": "Carried over from iter11: archived user login returns 403 instead of 401 — still un-addressed."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "app/users.tsx — Edit User modal", "issue": "'Zresetuj hasło' pressable is missing data-testid=user-reset-pw. Currently only the surrounding text 'Zresetuj hasło' is findable; the underlying pressable/action has no testID, blocking robust E2E automation of the B3 password-reset modal flow.", "testID": "user-reset-pw", "priority": "MEDIUM"},
+      {"component": "app/users.tsx — row edit/delete buttons", "issue": "Row 'Edytuj' and 'Usuń' buttons have no data-testid (e.g. user-edit-{id}, user-delete-{id}). We had to fall back to text-based selection which is fragile.", "testID": "user-edit-{id} / user-delete-{id}", "priority": "MEDIUM"}
+    ],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": [
+      {"component": "shadow* style props deprecation", "issue": "Console still warns '\"shadow*\" style props are deprecated. Use \"boxShadow\".' — carried over from iter11. Migrate shadowColor/shadowOffset/shadowOpacity/shadowRadius to boxShadow (RN 0.76+)."}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_runda13_backend.py",
+    "/app/test_reports/pytest/iter12_runda13.xml"
+  ],
+  "action_items": [
+    "IMPLEMENT B5 login lockout in server.py POST /api/auth/login: track failed_login_attempts + locked_until on users doc; return HTTP 423 with Polish/English message when locked; reset counter on successful login; 15-min TTL; SKIP counting for admin@bzone.app (or provide manual unlock path) to guarantee owner is never permanently locked. Verify with /app/backend/tests/test_runda13_backend.py::TestZ5B5LockoutAndRateLimit::test_login_lockout_after_5_failed_attempts.",
+    "Add data-testid attributes in app/users.tsx: user-edit-{id}, user-delete-{id}, user-reset-pw (on the reset-pw Pressable inside the Edit modal). Without these the FRONTEND-3 automated verification of the reset modal + 16-char password display + Kopiuj/Zamknij buttons cannot run reliably.",
+    "Follow-up manual/E2E verification needed for FRONTEND-4 (H7 element→drawing navigation with focus/highlight), FRONTEND-5 (H6.2 report edit before approval), FRONTEND-6 (H2/H3 dashboard tile — Dostawy numeric, no 'Harmonogram wkrótce' on contractor) — NOT executed this iteration.",
+    "Migrate shadow* to boxShadow (still open from iter11)."
+  ],
+  "critical_code_review_comments": [
+    "server.py: NO login-lockout code path exists. B5 was implemented for registration (in-memory 3/h/IP) but not for authentication. Missing: (1) increment failed_login_attempts on invalid pw, (2) set locked_until = now+15min at 5th failure, (3) short-circuit login with 423 when locked_until > now, (4) reset counter on success. Add to server.py:540-549 login flow.",
+    "server.py:1571 upload_file — A1 storage_put fallback: raises 503 correctly on transient errors; returns 402 explicitly on out-of-credits (nice). storage_path is unique per user (STORAGE_APP_NAME/uploads/{user_id}/{fid}{ext}) — good multitenancy.",
+    "server.py:864-877 update_project — A2 uses body.model_dump(exclude_unset=True) so partial PUT never wipes vat_tryb/termin_platnosci_*/dni_tyg. Confirmed live: PUT with only {nazwa} preserved all other fields. Good.",
+    "server.py:749-763 admin_reset_password — generates 16-char pw from _PW_ALPHABET, sets must_change_password=True, returns {reset,nowe}. Confirmed live: login with returned pw yields user.must_change_password=True.",
+    "server.py:1664 register_push — overwrites payload['user_id'] with authenticated user['id'] (E1b): a caller can't register a token for someone else. Good.",
+    "app/users.tsx — Row Edytuj/Usuń pressables and Zresetuj hasło pressable lack testIDs; block E2E automation."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_runda13_backend.py (NEW — 10 tests across 6 classes)",
+    "/app/test_reports/pytest/iter12_runda13.xml"
+  ],
+  "success_rate": {
+    "backend": "90% (9 passed, 1 failed — the failure is B5 login lockout not implemented)",
+    "frontend": "~65% (F1/F2/F3-partial/F7 verified; F4/F5/F6 not executed due to complexity + context budget)"
+  },
+  "seed_data_creation": "Ephemeral: 1× TEST_lock_*, 1× TEST_contr_*, 1× TEST_reset_*, and up-to-4× TEST_rate_* throwaway users registered via API and all archived (status='zarchiwizowany') at teardown / final cleanup. Admin admin@bzone.app: password NOT changed (still MSbk566lLvI4b!U4); must_change_password restored to True at end. No real crew accounts touched.",
+  "retest_needed": true,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Env: EXPO_PUBLIC_BACKEND_URL=https://app-builder-11766.preview.emergentagent.com. Admin admin@bzone.app / MSbk566lLvI4b!U4 (must_change_password=True — first login forces /change-password; bypass via POST /api/auth/change-password {\"nowe\":\"MSbk566lLvI4b!U4\"} with admin token). Rerun backend: `sudo supervisorctl restart backend && sleep 4 && pytest /app/backend/tests/test_runda13_backend.py -v -o addopts=` (restart clears the in-memory register rate-limit counter so all 3 register slots are available in a fresh run; without restart, 2nd immediate run will skip B3 & E1b classes). B5 login-lockout test is currently RED and will stay RED until the counter/locked_until code lands in server.py login handler. For FRONTEND 4/5/6 in the next iteration: create a throwaway TEST_R13 project as admin, add a folder+view+PNG image, add an element in edit-mode, then navigate to /element/{id} and verify testID=element-locate-btn opens /view/{viewId}?focus=... with element highlight; separately create a report and verify Edytuj button (report status=wyslany) opens prefilled edit form. Watch out for register-rate-limit if multiple throwaway users are needed — pre-create them before running the rate-limit test.",
+  "rca_of_issue": "B5 LOGIN LOCKOUT NOT IMPLEMENTED. RCA: the RUNDA 1.3 diff description in problem_statement claims 'login lockout + register rate-limit (B5)' but only the REGISTER half landed. Grep of server.py shows the term 'lockout' appears only in seed-admin recovery comments (line 2166) and never in the /auth/login handler. Reproduction: (1) create/approve a throwaway TEST_ user with a known password, (2) POST /api/auth/login with wrong password 5-6 times, (3) observe all responses return 401 (never 423). Expected per spec: after 5 failed attempts return 423 with 15-min lock message. Mitigation: implement failed-attempt counter (users.failed_login_attempts + users.locked_until), check locked_until > now at start of login handler, increment counter on verify_pw False, reset on success, and set locked_until = now+15min at attempt 5. Guard: skip counting the seed admin OR provide an admin-unlock endpoint so the owner is never permanently locked. Retest with test_login_lockout_after_5_failed_attempts."
+}

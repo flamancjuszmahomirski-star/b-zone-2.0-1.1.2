@@ -118,7 +118,7 @@ export default function Hours() {
             const dt = new Date(d);
             return (
               <Pressable key={d} testID={`date-${d}`} onPress={() => setDate(d)} style={[styles.dateChip, active && styles.dateChipActive]}>
-                <Text style={[styles.dateChipDay, active && { color: "#fff" }]}>{dt.toLocaleDateString("pl-PL", { weekday: "short" })}</Text>
+                <Text style={[styles.dateChipDay, active && { color: "#fff" }]}>{dt.toLocaleDateString(lang === "pl" ? "pl-PL" : "en-GB", { weekday: "short" })}</Text>
                 <Text style={[styles.dateChipNum, active && { color: "#fff" }]}>{dt.getDate()}</Text>
                 <View style={[styles.dot, { backgroundColor: st === "all" ? colors.success : st === "partial" ? colors.warning : "transparent" }]} />
               </Pressable>

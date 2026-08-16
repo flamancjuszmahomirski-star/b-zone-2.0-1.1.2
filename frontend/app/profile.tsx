@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { View, Text, StyleSheet, ScrollView, Pressable, Switch } from "react-native";
+import { View, Text, StyleSheet, ScrollView, Pressable } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
@@ -8,7 +8,6 @@ import { colors, spacing, font, radius } from "@/src/theme/tokens";
 import { useI18n } from "@/src/i18n/I18nContext";
 import { useAuth } from "@/src/context/AuthContext";
 import { api, uploadFile } from "@/src/api/client";
-import { storage } from "@/src/utils/storage";
 import { Header } from "@/src/components/Screen";
 import { Card } from "@/src/components/Card";
 import { Button } from "@/src/components/Button";
@@ -27,13 +26,8 @@ export default function Profile() {
   const [imie, setImie] = useState(user?.imie || "");
   const [nazwisko, setNazwisko] = useState(user?.nazwisko || "");
   const [telefon, setTelefon] = useState(user?.telefon || "");
-  const [pinEnabled, setPinEnabled] = useState(false);
   const [saving, setSaving] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
-
-  React.useEffect(() => {
-    storage.getItem<boolean>("bzone.pinEnabled", false).then((v) => setPinEnabled(!!v));
-  }, []);
 
   const changeAvatar = async () => {
     const cur = await ImagePicker.getMediaLibraryPermissionsAsync();
@@ -49,7 +43,7 @@ export default function Profile() {
       const updated = await api("/auth/me", { method: "PUT", body: { avatar_url: up.url } });
       setUser(updated);
       toast.show(t("saved"));
-    } catch { toast.show(t("error_generic"), "error"); }
+    } catch (e: any) { toast.show(e.message || t("error_generic"), "error"); }
   };
 
   const save = async () => {
@@ -67,8 +61,6 @@ export default function Profile() {
     setLang(next);
     api("/auth/me", { method: "PUT", body: { jezyk: next } }).catch(() => {});
   };
-
-  const togglePin = (v: boolean) => { setPinEnabled(v); storage.setItem("bzone.pinEnabled", v); };
 
   const doLogout = async () => { await logout(); router.replace("/login"); };
 
@@ -107,11 +99,14 @@ export default function Profile() {
           </Pressable>
         </Card>
 
-        <Card style={styles.settingRow}>
-          <Ionicons name="lock-closed" size={22} color={colors.brand} />
-          <Text style={styles.settingLabel}>{t("pin_lock")}</Text>
-          <Switch testID="profile-pin" value={pinEnabled} onValueChange={togglePin} trackColor={{ true: colors.brand }} />
-        </Card>
+        {/* B6: password change entry, all roles */}
+        <Pressable testID="profile-change-password" onPress={() => router.push("/change-password")}>
+          <Card style={styles.settingRow}>
+            <Ionicons name="key" size={22} color={colors.brand} />
+            <Text style={styles.settingLabel}>{t("change_password")}</Text>
+            <Ionicons name="chevron-forward" size={18} color={colors.muted} />
+          </Card>
+        </Pressable>
 
         <Button testID="logout-btn" title={t("logout")} onPress={doLogout} variant="danger" icon="log-out-outline" />
 

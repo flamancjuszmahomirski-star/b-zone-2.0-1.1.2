@@ -62,6 +62,8 @@ export default function ReportDetail() {
   if (!report) return <View style={styles.screen}><Header title={t("report")} back /><EmptyState icon="alert-circle-outline" message={t("unavailable")} /></View>;
 
   const canDelete = report.user_id === user?.id || user?.rola === "admin";
+  // H6.2: author or admin may edit a report BEFORE it is approved (evidentiary doc).
+  const canEditReport = (report.user_id === user?.id || user?.rola === "admin") && report.status !== "zatwierdzony";
 
   return (
     <View style={styles.screen}>
@@ -130,7 +132,7 @@ export default function ReportDetail() {
           </View>
         )}
 
-        {report.pogoda_json ? (
+        {report.pogoda_json && report.pogoda_json.temp != null ? (
           <Card style={styles.weather}>
             <Ionicons name="partly-sunny-outline" size={20} color={colors.info} />
             <View style={{ flex: 1 }}>
@@ -145,8 +147,11 @@ export default function ReportDetail() {
         ) : null}
       </ScrollView>
 
-      {(isManager && report.status === "wyslany") || canDelete ? (
+      {(isManager && report.status === "wyslany") || canDelete || canEditReport ? (
         <View style={[styles.footer, { paddingBottom: insets.bottom + spacing.sm }]}>
+          {canEditReport && (
+            <Button title={t("edit")} onPress={() => router.push(`/report-new?edit=${id}`)} variant="secondary" icon="create-outline" style={{ flex: 1 }} testID="edit-report" />
+          )}
           {isManager && report.status === "wyslany" && (
             <>
               <Button title={t("reject")} onPress={() => setRejectOpen(true)} variant="danger" style={{ flex: 1 }} testID="reject-report" />

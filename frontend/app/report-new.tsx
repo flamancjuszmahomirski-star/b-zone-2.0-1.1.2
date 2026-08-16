@@ -1,8 +1,8 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { View, Text, StyleSheet, TextInput } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { KeyboardAwareScrollView, KeyboardStickyView } from "react-native-keyboard-controller";
-import { useRouter } from "expo-router";
+import { useRouter, useLocalSearchParams } from "expo-router";
 import * as Haptics from "expo-haptics";
 import { colors, spacing, font, radius } from "@/src/theme/tokens";
 import { useI18n } from "@/src/i18n/I18nContext";
@@ -19,6 +19,8 @@ import { useDelayReasons } from "@/src/hooks/useDelayReasons";
 
 export default function ReportNew() {
   const { t, lang } = useI18n();
+  const { edit } = useLocalSearchParams<{ edit?: string }>();
+  const editing = !!edit;
   const { projects, selected } = useProjects();
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -36,6 +38,20 @@ export default function ReportNew() {
   const [elSel, setElSel] = useState<Record<string, boolean>>({});
   const [elPicker, setElPicker] = useState(false);
   const [saving, setSaving] = useState(false);
+
+  // H6.2: edit mode — prefill from the existing report; PUT on submit.
+  // (PUT updates opis/zdjecia/elementy; extra hours are managed via their own flow.)
+  useEffect(() => {
+    if (!edit) return;
+    api(`/reports/${edit}`).then((r: any) => {
+      setProjectId(r.project_id);
+      setOpis(r.opis || "");
+      setPhotos(r.zdjecia || []);
+      const ids: string[] = r.element_ids || (r.elementy || []).map((e: any) => e.id);
+      setElSel(Object.fromEntries(ids.map((i) => [i, true])));
+    }).catch(() => toast.show(t("error_network"), "error"));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [edit]);
 
   const projName = projects.find((p) => p.id === projectId)?.nazwa;
   const reasonLabel = reasons.find((r) => r.id === reasonId)?.[lang === "pl" ? "nazwa_pl" : "nazwa_en"];
@@ -62,9 +78,14 @@ export default function ReportNew() {
           opis: extraDesc,
         };
       }
-      await api("/reports", { method: "POST", body });
+      if (editing) {
+        await api(`/reports/${edit}`, { method: "PUT", body });
+        toast.show(t("saved"));
+      } else {
+        await api("/reports", { method: "POST", body });
+        toast.show(t("report_submitted"));
+      }
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
-      toast.show(t("report_submitted"));
       router.back();
     } catch (e: any) {
       toast.show(e.message || t("error_network"), "error");
@@ -75,7 +96,7 @@ export default function ReportNew() {
 
   return (
     <View style={styles.screen}>
-      <Header title={t("new_report")} back />
+      <Header title={editing ? t("edit_report") : t("new_report")} back />
       <KeyboardAwareScrollView
         bottomOffset={80}
         contentContainerStyle={{ padding: spacing.lg, gap: spacing.lg, paddingBottom: 120 }}
@@ -118,6 +139,7 @@ export default function ReportNew() {
           />
         </View>
 
+        {!editing && (
         <View style={styles.section}>
           <Text style={styles.label}>{t("extra_hours")} ({t("optional")})</Text>
           <TextInput
@@ -149,11 +171,12 @@ export default function ReportNew() {
             </>
           )}
         </View>
+        )}
       </KeyboardAwareScrollView>
 
       <KeyboardStickyView offset={{ closed: 0, opened: insets.bottom }}>
         <View style={[styles.footer, { paddingBottom: insets.bottom + spacing.sm }]}>
-          <Button testID="submit-report" title={t("submit_report")} onPress={submit} loading={saving} icon="send" />
+          <Button testID="submit-report" title={editing ? t("save") : t("submit_report")} onPress={submit} loading={saving} icon={editing ? "save" : "send"} />
         </View>
       </KeyboardStickyView>
 

@@ -7,7 +7,6 @@ import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { KeyboardProvider } from "react-native-keyboard-controller";
 import * as Notifications from "expo-notifications";
 import * as Linking from "expo-linking";
-import { storage } from "@/src/utils/storage";
 
 import { useIconFonts } from "@/src/hooks/use-icon-fonts";
 import { AuthProvider } from "@/src/context/AuthContext";
@@ -65,15 +64,6 @@ export default function RootLayout() {
       const url = data.deeplink || data.action_url;
       if (url) (url.startsWith("http") ? Linking.openURL(url) : router.push(url));
     });
-
-    (async () => {
-      const { status, canAskAgain } = await Notifications.getPermissionsAsync();
-      if (status !== "denied" || canAskAgain) return;
-      const lastNudge = await storage.getItem<number>("pushNudgeAt", 0);
-      const oneWeek = 7 * 24 * 60 * 60 * 1000;
-      if (lastNudge && Date.now() - Number(lastNudge) <= oneWeek) return;
-      await storage.setItem("pushNudgeAt", Date.now());
-    })();
 
     return () => {
       tapSub.remove();

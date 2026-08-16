@@ -38,7 +38,7 @@ function Metric({
 }
 
 export default function Dashboard() {
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
   const { user } = useAuth();
   const { selected, projects } = useProjects();
   const router = useRouter();
@@ -65,15 +65,17 @@ export default function Dashboard() {
         });
       } else if (role === "foreman") {
         if (selected) {
-          const [hours, reports, issues] = await Promise.all([
+          const [hours, reports, issues, deliveries] = await Promise.all([
             api(`/projects/${selected.id}/hours?data=${today}`),
             api(`/reports?project_id=${selected.id}&status=wyslany`),
             api(`/issues?project_id=${selected.id}`),
+            api(`/deliveries?project_id=${selected.id}`),
           ]);
           setData({
             crew: hours,
             reportsToApprove: reports.length,
             openIssues: issues.filter((i: any) => i.status === "otwarte").length,
+            deliveries: deliveries.filter((d: any) => d.status !== "zarchiwizowana").length,
           });
         }
       } else if (role === "worker" || role === "subcontractor") {
@@ -105,7 +107,7 @@ export default function Dashboard() {
     setRefreshing(false);
   };
 
-  const greeting = `${t("today")} · ${new Date().toLocaleDateString("pl-PL", { weekday: "long", day: "numeric", month: "long" })}`;
+  const greeting = `${t("today")} · ${new Date().toLocaleDateString(lang === "pl" ? "pl-PL" : "en-GB", { weekday: "long", day: "numeric", month: "long" })}`;
 
   return (
     <View style={styles.screen}>
@@ -165,7 +167,7 @@ export default function Dashboard() {
                     <Metric testID="metric-crew" icon="people" value={(data.crew || []).length} label={t("people_today")} onPress={() => router.push("/(tabs)/hours")} />
                     <Metric testID="metric-reports" icon="document-text" value={data.reportsToApprove || 0} label={t("reports_to_approve")} onPress={() => router.push("/(tabs)/reports")} />
                     <Metric testID="metric-issues" icon="alert-circle" value={data.openIssues || 0} label={t("open_issues")} onPress={() => router.push("/(tabs)/issues")} />
-                    <Metric testID="metric-deliveries" icon="cube" value={t("deliveries")} label="" onPress={() => router.push("/deliveries")} />
+                    <Metric testID="metric-deliveries" icon="cube" value={data.deliveries || 0} label={t("deliveries")} onPress={() => router.push("/deliveries")} />
                   </View>
                   <Button title={t("new_report")} icon="add-circle" onPress={() => router.push("/report-new")} testID="foreman-new-report" />
                   <Text style={styles.sectionTitle}>{t("who_on_site")}</Text>
@@ -209,10 +211,6 @@ export default function Dashboard() {
                 <Card testID="contractor-project" onPress={() => router.push(`/project/${selected.id}`)} style={styles.projCard}>
                   <Text style={styles.projName}>{selected.nazwa}</Text>
                   <Text style={styles.projMeta}>{selected.adres}</Text>
-                  <View style={styles.scheduleBox}>
-                    <Ionicons name="calendar-outline" size={16} color={colors.muted} />
-                    <Text style={styles.projMeta}>{t("schedule_soon")}</Text>
-                  </View>
                 </Card>
               )}
               <Button title={t("new_delivery")} icon="cube" onPress={() => router.push("/delivery-new")} testID="new-delivery-btn" />
@@ -246,5 +244,4 @@ const styles = StyleSheet.create({
   heroCard: { backgroundColor: colors.brandTertiary, borderColor: colors.brandSecondary, gap: spacing.xs },
   heroLabel: { color: colors.onBrandTertiary, fontSize: font.base, fontWeight: "600" },
   heroValue: { color: "#fff", fontSize: 44, fontWeight: "900" },
-  scheduleBox: { flexDirection: "row", alignItems: "center", gap: spacing.sm, marginTop: spacing.sm },
 });

@@ -1,0 +1,41 @@
+{
+  "summary": "RUNDA 1.3 v1.0.9 iter13 FRONTEND-ONLY follow-up (F3-complete, F4, F4b, F5, F6, F8). ALL 7 SUB-FLOWS PASS. F3: admin edit user modal → 'reset-pw' opens 'generated-pw' MODAL (not toast) showing exactly 16-char pw + 'copy-pw' + 'close-pw' buttons ✓. F4: /element/{id} shows 'show-on-view' Button → taps land on /view/{vid}?focus={id} → detail sheet auto-opens with element code 'B-01', marker-{id} has 3px white border (borderWidth=3px, borderColor=rgb(255,255,255)), background PNG image renders (not black canvas) ✓. F4b: setting file.status='utracony' in mongo makes /view/{vid} render the 'Plik utracony / Nie udało się wczytać zrzutu (plik utracony?)' fallback instead of a black canvas ✓ (file status restored after). F5: /report-new create with project TEST_R13H7 + opis 'raport testowy 13' → open report detail as admin → 'edit-report' button visible (status=wyslany, author=admin) → tap → /report-new?edit={id} opens with description PREFILLED ('raport testowy 13') → change to 'raport testowy 13 EDIT' → save → detail shows updated description ✓ → tap 'approve-report' → 'edit-report' DISAPPEARS ✓. F6 foreman: dashboard 'metric-deliveries' shows numeric value '0' as value line + 'Dostawy' as label (not the word 'Dostawy' as value) ✓. F6 contractor: dashboard shows NO 'Harmonogram wkrótce' / no 'wkrótce' string; only project card + 'Nowa awizacja' + 'Dostawy' metric ✓. F8: with element status='zgloszony_gotowy' the receipts row exposes testID 'receipt-locate-{id}' whose tap navigates to /element/{id} without toggling the checkbox ✓. Deprecated-package warnings: expo/react-native console still emits 'shadow* style props are deprecated. Use boxShadow' (carried over from iter11/iter12) — no functional impact. No other RN issues detected.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": [
+      {"component": "shadow* style props", "issue": "Console warning: '\"shadow*\" style props are deprecated. Use \"boxShadow\".' — carried over from iter11/iter12. Multiple components across the app still use shadowColor/shadowOffset/shadowOpacity/shadowRadius. Migrate to boxShadow (RN 0.76+). No functional impact but noisy warnings during dev/testing."}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/seed_runda13_frontend.py"
+  ],
+  "action_items": [
+    "(Non-blocking) Migrate remaining shadow* style props to boxShadow across the app to silence RN 0.76+ deprecation warnings.",
+    "All F3/F4/F4b/F5/F6/F8 flows PASS — no functional fixes required for RUNDA 1.3 v1.0.9."
+  ],
+  "critical_code_review_comments": [
+    "app/users.tsx:197-217 — 'reset-pw' Pressable + 'generated-pw' Modal + 'copy-pw'/'close-pw' correctly rendered inside <Modal transparent animationType='fade'>, matching spec (modal, not toast). Content displays selectable 16-char password + 'pw_change_on_login' info line. Good.",
+    "app/element/[id].tsx:60-68 — 'show-on-view' button correctly guarded by el.view_id and routes to /view/{view_id}?focus={element_id}. Good.",
+    "app/view/[id].tsx:69-82 — focus param handling: sets focusId, computes centered translate + zoom (scale=2), opens detail sheet via setDetail(fel). marker style at 206-207 uses borderWidth=3 + borderColor=#fff when isFocus. Confirmed live: 3px white border rendered.",
+    "app/view/[id].tsx:180-193 — imgError fallback: when Image onError fires, renders localized 'file_lost' + 'image_load_failed' block inside canvasWrap instead of black area. Confirmed live with file.status='utracony' via mongo.",
+    "app/report-new.tsx:22-54 — edit mode via ?edit={id}: fetches /reports/{id}, prefills opis + photos + selected element_ids; submit() branches PUT vs POST. Extra-hours section hidden while editing (spec-compliant).",
+    "app/report/[id].tsx:66,150-154 — canEditReport = (author or admin) AND status !== 'zatwierdzony' → 'edit-report' button correctly hides after approval. Verified live.",
+    "app/(tabs)/index.tsx:170 — foreman 'metric-deliveries' uses value={data.deliveries || 0} (numeric) + label={t('deliveries')} — correct schema. Contractor branch (206-218) has NO 'Harmonogram' JSX — clean.",
+    "app/receipts/[projectId].tsx:78-85 — 'receipt-locate-{id}' Pressable uses ev.stopPropagation() before router.push, preventing the outer row Pressable (checkbox toggle) from firing. Verified live: tapping locate navigates without ticking the checkbox."
+  ],
+  "updated_files": [
+    "/app/backend/tests/seed_runda13_frontend.py (NEW — creates TEST_R13H7 project, PNG file, folder, view, element B-01, TEST_ worker/foreman/contractor users via mongo with company_id=bzone-default, adds foreman+contractor as project members)"
+  ],
+  "success_rate": {
+    "backend": "n/a — frontend-only iteration",
+    "frontend": "100% (F3/F4/F4b/F5/F6/F8 — 6 of 6 flows PASS)"
+  },
+  "seed_data_creation": "Created via /app/backend/tests/seed_runda13_frontend.py (uses public API + direct mongo): 1× TEST_R13H7 project, 1× 200x150 PNG file, 1× TEST_F folder, 1× TEST_V view, 1× B-01 element (initial status=do_wykonania, flipped to zgloszony_gotowy for F8), 1× TEST_worker_9b37e2@bzone.pl (worker, rate=15), 1× TEST_foreman_bdb413@bzone.pl (foreman, rate=25), 1× TEST_contr_4c69a1@bzone.pl (contractor). All TEST_ users' emails are lowercase and use @bzone.pl (email-validator rejects @.test as reserved TLD). Foreman + contractor added as project members via POST /projects/{pid}/members. Cleanup: all TEST_ users archived (status=zarchiwizowany), TEST_R13H7 project archived, file.status restored to aktywny after F4b, admin must_change_password restored to True.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Env: EXPO_PUBLIC_BACKEND_URL=https://app-builder-11766.preview.emergentagent.com. Admin admin@bzone.app / MSbk566lLvI4b!U4 (must_change_password=True — bypass with POST /api/auth/change-password {\"nowe\":\"MSbk566lLvI4b!U4\"} using admin token). GOTCHAS discovered this iteration for direct-mongo user seeding: (1) user password field is `hash` (NOT `haslo_hash`), (2) MUST set company_id='bzone-default' or user won't show in /api/users?status=aktywny, (3) email MUST be stored lowercase (login handler uses body.email.lower() for lookup), (4) email TLD `.test` is rejected by pydantic EmailStr — use `.pl`/`.com`. Cleanup completed for iter13 seed data; if same session-scoped rate-limits (register 3/h/IP) hit during future iterations, use direct-mongo user creation (script /app/backend/tests/seed_runda13_frontend.py as template) instead of /auth/register.",
+  "rca_of_issue": "n/a — no failures; all 6 verified flows PASS."
+}

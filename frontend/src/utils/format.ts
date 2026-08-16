@@ -1,17 +1,18 @@
 // Formatting helpers.
 
-// Currency with abbreviation: 225000 -> "225 tys. €", 1200 -> "1,2 tys. €".
-export function formatCurrency(amount: number, currency = "EUR"): string {
+// Currency with abbreviation: 225000 -> "225 tys. €" (PL) / "225k €" (EN).
+export function formatCurrency(amount: number, currency = "EUR", lang: string = "pl"): string {
   const sym = currency === "EUR" ? "€" : currency;
+  const abbr = lang === "pl" ? " tys." : "k";
   if (amount == null || isNaN(amount)) return `0 ${sym}`;
   const abs = Math.abs(amount);
   if (abs >= 1000) {
     const tys = amount / 1000;
     const str =
-      tys % 1 === 0 ? String(tys) : tys.toFixed(1).replace(".", ",");
-    return `${str} tys. ${sym}`;
+      tys % 1 === 0 ? String(tys) : tys.toFixed(1).replace(".", lang === "pl" ? "," : ".");
+    return `${str}${abbr} ${sym}`;
   }
-  return `${amount.toString().replace(".", ",")} ${sym}`;
+  return `${amount.toString().replace(".", lang === "pl" ? "," : ".")} ${sym}`;
 }
 
 export function formatDate(iso?: string | null, lang: string = "pl"): string {

@@ -71,3 +71,18 @@ ODŁOŻONE (dedykowana tura, za duże/ryzykowne na resztę budżetu): D — wsp�
 ## Notes / Not-yet-live
 - Push notifications: structure implemented (register-push + server-side send_push on events). Requires `google-services.json` (Android) + deploy → build to actually deliver; does NOT work in Expo Go.
 - App logo: bison-in-hard-hat placeholder ("BZ"/hammer) — swap in real PNG when provided (icon, splash, login).
+
+## Runda 1.3 (v1.0.9, versionCode 125) — DONE 2026-06
+- A1: Emergent Object Storage dla plików (upload/odczyt, fallback legacy, sweep sierot -> status "utracony" + 410, UI fallback "Plik utracony" zamiast czarnego rysunku)
+- A2: PUT /projects partial update (exclude_unset)
+- B3: hasło generowane backendem (secrets, 16 zn.) + modal z Kopiuj; B5: lockout 5 prób/15 min (423) + rejestracja 3/h/IP (429); B6: "Zmień hasło" w profilu
+- C2b: eksport ZIP natywnie (expo-file-system/legacy + expo-sharing); C3: pogoda ukryta gdy brak temp (backend+frontend); C4: detailToMessage dla 422
+- D: adjustResize, tab bar + insets.bottom, KeyboardAvoidingView w modalach (users, dodaj-element)
+- E1b: role guards (POST /reports, /extra-hours bez contractor; łaty: DELETE /deliveries owner/manager, /register-push auth); E3: natychmiastowa miniatura + "Wysyłanie…"; E4: catch-e.message
+- E2 ODŁOŻONE (decyzja właściciela — Etap 3 zmieni model godzin)
+- G1: blockedPermissions; G2: CORS credentials off; G3: PIN switch usunięty
+- H1: nudge usunięty; H2: kafelek harmonogram usunięty; H3: Dostawy=liczba; H4: st_zatwierdzone + dedup; H5: i18n literały; H6: unreceive UI + edycja raportu (przed zatwierdzeniem); H7: "Pokaż na zrzucie" + ?focus= (zoom/highlight/detail) + celownik w odbiorach
+- /api/admin/health: + llm_key_configured, storage_configured, files_total/in_storage/utracone
+- Testy: iter12 (backend 10/10 po poprawce B5), iter13 (frontend 6/6)
+- Sprawozdanie: /app/memory/SPRAWOZDANIE-RUNDA-1.3.md
+- UWAGA TECHNICZNA dla agentów: NIE wykonywać wielu search_replace RÓWNOLEGLE na TYM SAMYM pliku — edycje się gubią (3 przypadki w tej sesji).

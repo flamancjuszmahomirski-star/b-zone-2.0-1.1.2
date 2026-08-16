@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { View, Text, StyleSheet, Pressable, ScrollView, Linking, Modal } from "react-native";
+import { View, Text, StyleSheet, Pressable, ScrollView, Linking, Modal, ActivityIndicator } from "react-native";
 import { Image } from "expo-image";
 import { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
@@ -24,6 +24,8 @@ export function PhotoStrip({
   const toast = useToast();
   const [picker, setPicker] = useState(false);
   const [uploading, setUploading] = useState(false);
+  // E3: local uri shown IMMEDIATELY after capture, with an "uploading" overlay.
+  const [pendingUri, setPendingUri] = useState<string | null>(null);
 
   const getGps = async (): Promise<{ lat: number; lng: number } | null> => {
     try {
@@ -74,6 +76,7 @@ export function PhotoStrip({
       else toast.show(t("upload_failed_retry"), "error");
     } finally {
       setUploading(false);
+      setPendingUri(null);
     }
   };
 
@@ -123,6 +126,15 @@ export function PhotoStrip({
             </Pressable>
           </View>
         ))}
+        {pendingUri && (
+          <View style={styles.thumbWrap}>
+            <Image source={{ uri: pendingUri }} style={styles.thumb} contentFit="cover" />
+            <View style={styles.uploadOverlay}>
+              <ActivityIndicator color={colors.brand} size="small" />
+              <Text style={styles.uploadText}>{t("uploading")}</Text>
+            </View>
+          </View>
+        )}
         <Pressable testID="add-photo-btn" onPress={() => setPicker(true)} style={styles.addBtn} disabled={uploading}>
           <Ionicons name={uploading ? "hourglass" : "camera"} size={26} color={colors.brand} />
           <Text style={styles.addText} numberOfLines={2}>{uploading ? t("uploading_photo") : t("add_photo")}</Text>
@@ -160,6 +172,11 @@ const styles = StyleSheet.create({
     borderStyle: "dashed", alignItems: "center", justifyContent: "center", gap: 2, backgroundColor: colors.surfaceSecondary,
   },
   addText: { color: colors.brand, fontSize: 10, fontWeight: "600" },
+  uploadOverlay: {
+    ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(0,0,0,0.45)",
+    borderRadius: radius.md, alignItems: "center", justifyContent: "center", gap: 4,
+  },
+  uploadText: { color: "#fff", fontSize: 10, fontWeight: "700" },
   backdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.6)", justifyContent: "flex-end" },
   sheet: { backgroundColor: colors.surfaceTertiary, borderTopLeftRadius: radius.lg, borderTopRightRadius: radius.lg, padding: spacing.xl, paddingBottom: spacing.xxxl, gap: spacing.sm },
   sheetRow: { flexDirection: "row", alignItems: "center", gap: spacing.md, padding: spacing.md },

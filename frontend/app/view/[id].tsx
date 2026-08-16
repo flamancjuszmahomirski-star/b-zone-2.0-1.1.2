@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useRef } from "react";
-import { View, Text, StyleSheet, Pressable, Modal, TextInput, ScrollView, ActivityIndicator, Dimensions } from "react-native";
+import { View, Text, StyleSheet, Pressable, Modal, TextInput, ScrollView, ActivityIndicator, Dimensions, KeyboardAvoidingView, Platform } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Image } from "expo-image";
 import { Ionicons } from "@expo/vector-icons";
@@ -21,7 +21,7 @@ import { useDelayReasons } from "@/src/hooks/useDelayReasons";
 const SCREEN = Dimensions.get("window");
 
 export default function ViewCanvas() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const { id, focus } = useLocalSearchParams<{ id: string; focus?: string }>();
   const { t, lang } = useI18n();
   const { user } = useAuth();
   const router = useRouter();
@@ -37,6 +37,10 @@ export default function ViewCanvas() {
   const [selected, setSelected] = useState<Record<string, boolean>>({});
   const [detail, setDetail] = useState<any>(null);
   const [typePicker, setTypePicker] = useState(false);
+  // A1: lost/unloadable background image → clear message instead of a black canvas.
+  const [imgError, setImgError] = useState(false);
+  // H7: element highlighted via ?focus= param.
+  const [focusId, setFocusId] = useState<string | null>(null);
 
   // add/series form
   const [pendingPos, setPendingPos] = useState<{ x: number; y: number } | null>(null);
@@ -60,9 +64,25 @@ export default function ViewCanvas() {
     try {
       const [v, ty2] = await Promise.all([api(`/views/${id}`), api("/element-types")]);
       setView(v); setElements(v.elementy || []); setTypes(ty2);
-      if (v.szerokosc && v.wysokosc) setBaseH(SCREEN.width * (v.wysokosc / v.szerokosc));
+      const bh = v.szerokosc && v.wysokosc ? SCREEN.width * (v.wysokosc / v.szerokosc) : SCREEN.width * 0.75;
+      if (v.szerokosc && v.wysokosc) setBaseH(bh);
+      // H7: center + zoom on the focused element, highlight it and open its detail.
+      if (focus) {
+        const fel = (v.elementy || []).find((e: any) => e.id === focus);
+        if (fel) {
+          setFocusId(fel.id);
+          const s = 2;
+          const txv = s * (SCREEN.width / 2 - fel.pozycja_x * SCREEN.width);
+          const tyv = s * (bh / 2 - fel.pozycja_y * bh);
+          scale.value = withTiming(s); savedScale.value = s;
+          tx.value = withTiming(txv); stx.value = txv;
+          ty.value = withTiming(tyv); sty.value = tyv;
+          setDetail(fel);
+        }
+      }
     } catch { setView(null); } finally { setLoading(false); }
-  }, [id]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id, focus]);
   useFocusEffect(useCallback(() => { setLoading(true); load(); }, [load]));
 
   const addAt = (relX: number, relY: number) => {
@@ -157,16 +177,36 @@ export default function ViewCanvas() {
       <View style={styles.canvasWrap}>
         <GestureDetector gesture={composed}>
           <Animated.View style={[{ width: baseW, height: baseH }, animStyle]}>
-            <Image source={{ uri: fileUrl(view.plik_url) }} style={{ width: baseW, height: baseH }} contentFit="contain" />
+            {imgError ? (
+              <View style={[styles.imgFallback, { width: baseW, height: baseH }]}>
+                <Ionicons name="image-outline" size={40} color={colors.muted} />
+                <Text style={styles.imgFallbackTitle}>{t("file_lost")}</Text>
+                <Text style={styles.imgFallbackText}>{t("image_load_failed")}</Text>
+              </View>
+            ) : (
+              <Image
+                source={{ uri: fileUrl(view.plik_url) }}
+                style={{ width: baseW, height: baseH }}
+                contentFit="contain"
+                onError={() => setImgError(true)}
+              />
+            )}
             {elements.map((el) => {
               const c = elementStatusColor(el.status);
               const isSel = selected[el.id];
+              const isFocus = el.id === focusId;
               return (
                 <Pressable
                   key={el.id}
                   testID={`marker-${el.id}`}
                   onPress={() => onMarkerPress(el)}
-                  style={[styles.marker, { left: el.pozycja_x * baseW - 12, top: el.pozycja_y * baseH - 12, backgroundColor: c, borderColor: isSel ? "#fff" : "rgba(0,0,0,0.4)", borderWidth: isSel ? 2 : 1 }]}
+                  style={[styles.marker, {
+                    left: el.pozycja_x * baseW - 12, top: el.pozycja_y * baseH - 12,
+                    backgroundColor: c,
+                    borderColor: isFocus || isSel ? "#fff" : "rgba(0,0,0,0.4)",
+                    borderWidth: isFocus ? 3 : isSel ? 2 : 1,
+                    zIndex: isFocus ? 10 : undefined,
+                  }]}
                 >
                   <Text style={styles.markerText} numberOfLines={1}>{el.kod}</Text>
                 </Pressable>
@@ -208,6 +248,7 @@ export default function ViewCanvas() {
 
       {/* add element modal */}
       <Modal visible={!!pendingPos} transparent animationType="fade" onRequestClose={() => setPendingPos(null)}>
+        <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={{ flex: 1 }}>
         <Pressable style={styles.backdrop} onPress={() => setPendingPos(null)}>
           <Pressable style={styles.sheet} onPress={() => {}}>
             <Text style={styles.sheetTitle}>{t("add_element")}</Text>
@@ -219,6 +260,7 @@ export default function ViewCanvas() {
             </View>
           </Pressable>
         </Pressable>
+        </KeyboardAvoidingView>
       </Modal>
 
       {/* element detail sheet */}
@@ -269,6 +311,9 @@ const styles = StyleSheet.create({
   seriesForm: { flexDirection: "row", gap: spacing.sm, flex: 1 },
   seriesInput: { flex: 1, backgroundColor: colors.surface, borderRadius: radius.sm, borderWidth: 1, borderColor: colors.border, paddingHorizontal: spacing.sm, color: colors.onSurface, minHeight: 40 },
   editHint: { color: colors.muted, fontSize: font.sm, flex: 1 },
+  imgFallback: { alignItems: "center", justifyContent: "center", gap: spacing.sm, backgroundColor: colors.surfaceSecondary },
+  imgFallbackTitle: { color: colors.onSurface, fontSize: font.lg, fontWeight: "800" },
+  imgFallbackText: { color: colors.muted, fontSize: font.sm, textAlign: "center", paddingHorizontal: spacing.xl },
   footer: { flexDirection: "row", gap: spacing.md, padding: spacing.lg, borderTopWidth: 1, borderTopColor: colors.divider, backgroundColor: colors.surface },
   backdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.6)", justifyContent: "center", padding: spacing.xl },
   sheet: { backgroundColor: colors.surfaceTertiary, borderRadius: radius.lg, padding: spacing.xl, gap: spacing.lg },

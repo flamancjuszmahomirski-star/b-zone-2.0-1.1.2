@@ -1,5 +1,7 @@
 import React from "react";
 import { View, Text, StyleSheet, ScrollView, Pressable, Platform } from "react-native";
+import * as FileSystem from "expo-file-system/legacy";
+import * as Sharing from "expo-sharing";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
@@ -21,23 +23,35 @@ export default function More() {
   const toast = useToast();
   const role = user?.rola;
 
+  // C2b: export must actually be SAVED/SHARED before we confirm success.
+  // Web: browser download. Native: expo-file-system (cache) + expo-sharing sheet.
   const doExport = async () => {
     try {
       const headers = await authHeader();
-      const res = await fetch(`${API}/export`, { headers });
-      if (!res.ok) throw new Error("export");
+      const name = `bzone-export-${new Date().toISOString().slice(0, 10)}.zip`;
       if (Platform.OS === "web") {
+        const res = await fetch(`${API}/export`, { headers });
+        if (!res.ok) throw new Error("export");
         const blob = await res.blob();
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
-        a.href = url; a.download = "bzone-export.zip"; a.click();
+        a.href = url; a.download = name; a.click();
         URL.revokeObjectURL(url);
+      } else {
+        const dest = `${FileSystem.cacheDirectory}${name}`;
+        const dl = await FileSystem.downloadAsync(`${API}/export`, dest, { headers });
+        if (dl.status !== 200) throw new Error("export");
+        if (await Sharing.isAvailableAsync()) {
+          await Sharing.shareAsync(dl.uri, { mimeType: "application/zip", dialogTitle: name });
+        } else {
+          throw new Error("sharing-unavailable");
+        }
       }
       const info: any = await api("/export/last");
       const when = info?.last_export_at ? String(info.last_export_at).slice(0, 16).replace("T", " ") : "";
       toast.show(`${t("export_done")}${when ? " · " + when : ""}`);
     } catch {
-      toast.show(t("error_generic"), "error");
+      toast.show(t("export_save_failed"), "error");
     }
   };
 

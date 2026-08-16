@@ -1,5 +1,5 @@
 import React, { useState, useCallback } from "react";
-import { View, Text, StyleSheet, ScrollView, Pressable, Modal, TextInput, RefreshControl } from "react-native";
+import { View, Text, StyleSheet, ScrollView, Pressable, Modal, TextInput, RefreshControl, KeyboardAvoidingView, Platform, Clipboard } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useFocusEffect } from "expo-router";
 import { colors, spacing, font, radius } from "@/src/theme/tokens";
@@ -34,6 +34,7 @@ export default function Users() {
   const [telefon, setTelefon] = useState("");
   const [rolePicker, setRolePicker] = useState(false);
   const [deleteUser, setDeleteUser] = useState<any>(null);
+  const [genPw, setGenPw] = useState<string | null>(null);
 
   const roleOptions = [
     { value: "admin", label: t("role_admin") },
@@ -79,13 +80,19 @@ export default function Users() {
     }
   };
 
+  // B3: backend generates a crypto-random 16-char password and returns it once;
+  // shown in a modal (not a toast) with copy + first-login-change info.
   const resetPw = async () => {
     if (!editUser) return;
     try {
-      const gen = Math.random().toString(36).slice(2) + "Aa1!" + Math.random().toString(36).slice(2, 6);
-      await api(`/users/${editUser.id}/reset-password`, { method: "POST", body: { nowe: gen } });
-      toast.show(`${t("reset_password")}: ${gen}`);
+      const r: any = await api(`/users/${editUser.id}/reset-password`, { method: "POST", body: {} });
+      setGenPw(r.nowe);
     } catch (e: any) { toast.show(e.message || t("error_generic"), "error"); }
+  };
+
+  const copyPw = () => {
+    if (!genPw) return;
+    try { Clipboard.setString(genPw); toast.show(t("copied")); } catch { /* selectable text remains */ }
   };
 
   const reject = async (u: any) => {
@@ -152,6 +159,7 @@ export default function Users() {
       )}
 
       <Modal visible={!!editUser} transparent animationType="slide" onRequestClose={() => setEditUser(null)}>
+        <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={{ flex: 1 }}>
         <Pressable style={styles.backdrop} onPress={() => setEditUser(null)}>
           <Pressable style={styles.sheet} onPress={() => {}}>
             <View style={styles.handle} />
@@ -194,6 +202,22 @@ export default function Users() {
             </View>
           </Pressable>
         </Pressable>
+        </KeyboardAvoidingView>
+      </Modal>
+
+      {/* B3: generated password modal */}
+      <Modal visible={!!genPw} transparent animationType="fade" onRequestClose={() => setGenPw(null)}>
+        <View style={styles.pwBackdrop}>
+          <View style={styles.pwCard}>
+            <Text style={styles.sheetTitle}>{t("generated_password")}</Text>
+            <Text selectable testID="generated-pw" style={styles.pwValue}>{genPw}</Text>
+            <Text style={styles.pwInfo}>{t("pw_change_on_login")}</Text>
+            <View style={{ flexDirection: "row", gap: spacing.md }}>
+              <Button title={t("copy")} onPress={copyPw} variant="secondary" icon="copy-outline" style={{ flex: 1 }} testID="copy-pw" />
+              <Button title={t("close")} onPress={() => setGenPw(null)} style={{ flex: 1 }} testID="close-pw" />
+            </View>
+          </View>
+        </View>
       </Modal>
 
       <SelectSheet visible={rolePicker} title={t("assign_role")} options={roleOptions} selected={role} onSelect={setRole} onClose={() => setRolePicker(false)} />
@@ -220,4 +244,8 @@ const styles = StyleSheet.create({
   sheetTitle: { color: colors.onSurface, fontSize: font.xl, fontWeight: "800" },
   label: { color: colors.onSurfaceSecondary, fontSize: font.sm, fontWeight: "600" },
   input: { backgroundColor: colors.surfaceSecondary, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, padding: spacing.md, color: colors.onSurface, fontSize: font.lg },
+  pwBackdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.7)", justifyContent: "center", padding: spacing.xl },
+  pwCard: { backgroundColor: colors.surfaceTertiary, borderRadius: radius.lg, padding: spacing.xl, gap: spacing.md, borderWidth: 1, borderColor: colors.brand },
+  pwValue: { color: colors.brand, fontSize: 22, fontWeight: "800", letterSpacing: 1, textAlign: "center", paddingVertical: spacing.md, backgroundColor: colors.surface, borderRadius: radius.md },
+  pwInfo: { color: colors.muted, fontSize: font.sm, textAlign: "center" },
 });

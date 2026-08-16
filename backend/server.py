@@ -13,6 +13,7 @@ import re
 import uuid
 import asyncio
 import logging
+import secrets
 import tempfile
 import mimetypes
 from pathlib import Path
@@ -21,7 +22,7 @@ from datetime import datetime, timezone, timedelta, date
 import jwt
 import httpx
 import bcrypt
-from fastapi import FastAPI, APIRouter, HTTPException, Depends, UploadFile, File, Form, Header, Query
+from fastapi import FastAPI, APIRouter, HTTPException, Depends, UploadFile, File, Form, Header, Query, Request
 from fastapi.responses import StreamingResponse
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -45,9 +46,52 @@ PUSH_BASE_URL = "https://integrations.emergentagent.com"
 ADMIN_EMAIL = os.environ.get("SEED_ADMIN_EMAIL", "")
 ADMIN_PASSWORD = os.environ.get("SEED_ADMIN_PASSWORD", "")
 
-# Uploads dir: use a writable/persistent path in production if provided, else local.
+# Legacy local uploads dir (read-only fallback for pre-1.0.9 records).
 UPLOAD_DIR = Path(os.environ.get("UPLOAD_DIR", str(ROOT_DIR / "uploads")))
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+
+# ---------------------------------------------------------------------------
+# A1: Emergent Managed Object Storage — permanent file storage (survives redeploys)
+# ---------------------------------------------------------------------------
+STORAGE_BASE = (os.environ.get("INTEGRATION_PROXY_URL") or "").strip() or "https://integrations.emergentagent.com"
+STORAGE_URL = STORAGE_BASE.rstrip("/") + "/objstore/api/v1/storage"
+STORAGE_APP_NAME = "b-zone-2.0"
+_storage_key: Optional[str] = None
+
+
+async def _init_storage(force: bool = False) -> str:
+    global _storage_key
+    if _storage_key and not force:
+        return _storage_key
+    async with httpx.AsyncClient(timeout=30.0) as c:
+        resp = await c.post(f"{STORAGE_URL}/init", json={"emergent_key": EMERGENT_LLM_KEY})
+        resp.raise_for_status()
+        _storage_key = resp.json()["storage_key"]
+    return _storage_key
+
+
+async def storage_put(path: str, data: bytes, content_type: str) -> dict:
+    key = await _init_storage()
+    async with httpx.AsyncClient(timeout=120.0) as c:
+        resp = await c.put(f"{STORAGE_URL}/objects/{path}",
+                           headers={"X-Storage-Key": key, "Content-Type": content_type}, content=data)
+        if resp.status_code == 503:  # stale storage key → re-init once
+            key = await _init_storage(force=True)
+            resp = await c.put(f"{STORAGE_URL}/objects/{path}",
+                               headers={"X-Storage-Key": key, "Content-Type": content_type}, content=data)
+        resp.raise_for_status()
+        return resp.json()
+
+
+async def storage_get(path: str) -> tuple:
+    key = await _init_storage()
+    async with httpx.AsyncClient(timeout=60.0) as c:
+        resp = await c.get(f"{STORAGE_URL}/objects/{path}", headers={"X-Storage-Key": key})
+        if resp.status_code == 503:
+            key = await _init_storage(force=True)
+            resp = await c.get(f"{STORAGE_URL}/objects/{path}", headers={"X-Storage-Key": key})
+        resp.raise_for_status()
+        return resp.content, resp.headers.get("Content-Type", "application/octet-stream")
 
 ROLES = ("admin", "foreman", "subcontractor", "worker", "contractor")
 
@@ -382,6 +426,9 @@ async def fetch_weather(address: str) -> Optional[dict]:
                 },
             )
             cur = wx.json().get("current", {})
+            # C3: partial data (no temperature) is useless on an evidentiary report — treat as no data.
+            if cur.get("temperature_2m") is None:
+                return None
             return {
                 "temp": cur.get("temperature_2m"),
                 "wiatr": cur.get("wind_speed_10m"),
@@ -455,8 +502,18 @@ async def ensure_accrual(project: dict, day: str):
 # ===========================================================================
 # AUTH
 # ===========================================================================
+# B5: registration rate limit — max 3/h/IP (in-memory; resets on restart, acceptable for anti-spam).
+_register_hits: dict = {}
+
+
 @api.post("/auth/register", status_code=201)
-async def register(body: RegisterIn):
+async def register(body: RegisterIn, request: Request):
+    ip = (request.headers.get("x-forwarded-for") or "").split(",")[0].strip() or (request.client.host if request.client else "?")
+    now_ts = datetime.now(timezone.utc).timestamp()
+    hits = [ts for ts in _register_hits.get(ip, []) if now_ts - ts < 3600]
+    if len(hits) >= 3:
+        raise HTTPException(429, "Za dużo rejestracji z tego adresu. Spróbuj za godzinę / Too many registrations, try in an hour")
+    _register_hits[ip] = hits + [now_ts]
     if len(body.haslo) < PASSWORD_MIN:
         raise HTTPException(422, f"Hasło musi mieć min. {PASSWORD_MIN} znaków / Password min {PASSWORD_MIN} chars")
     exists = await db.users.find_one({"email": body.email.lower()})
@@ -479,11 +536,30 @@ async def register(body: RegisterIn):
     return {"status": "oczekujacy", "message": "Konto oczekuje na zatwierdzenie przez administratora."}
 
 
+LOCKOUT_ATTEMPTS = 5
+LOCKOUT_MINUTES = 15
+
+
 @api.post("/auth/login")
 async def login(body: LoginIn):
     user = await db.users.find_one({"email": body.email.lower()})
+    # B5: per-account lockout — 5 failed attempts → 15 min block (counter in DB).
+    if user:
+        locked_until = user.get("locked_until")
+        if locked_until and locked_until > now_iso():
+            raise HTTPException(423, f"Konto zablokowane po {LOCKOUT_ATTEMPTS} nieudanych próbach. "
+                                     f"Spróbuj za {LOCKOUT_MINUTES} min / Account locked, retry in {LOCKOUT_MINUTES} min")
     if not user or not verify_pw(body.haslo, user.get("hash", "")):
+        if user:
+            fails = int(user.get("failed_logins") or 0) + 1
+            upd = {"failed_logins": fails}
+            if fails >= LOCKOUT_ATTEMPTS:
+                upd["locked_until"] = (datetime.now(timezone.utc) + timedelta(minutes=LOCKOUT_MINUTES)).isoformat()
+                upd["failed_logins"] = 0
+            await db.users.update_one({"id": user["id"]}, {"$set": upd})
         raise HTTPException(401, "Błędny e-mail lub hasło / Invalid credentials")
+    if user.get("failed_logins") or user.get("locked_until"):
+        await db.users.update_one({"id": user["id"]}, {"$set": {"failed_logins": 0, "locked_until": None}})
     if user.get("status") == "oczekujacy":
         raise HTTPException(403, "Konto oczekuje na zatwierdzenie / Pending approval")
     if user.get("status") != "aktywny" or not user.get("rola"):
@@ -593,6 +669,9 @@ async def admin_health(admin: dict = Depends(require("admin"))):
         "index_names": list(idx.keys()),
         "kod_norm_backfilled": (await db.elements.count_documents({"kod_norm": {"$exists": False}})) == 0,
         "duplicate_code_groups": dups,
+        # A1/E6 diagnostics: storage + LLM key presence (booleans only, no secrets).
+        "llm_key_configured": bool(EMERGENT_LLM_KEY),
+        "storage_configured": bool(EMERGENT_LLM_KEY),
         "counts": {
             "users": await db.users.count_documents({}),
             "users_active": await db.users.count_documents({"status": "aktywny"}),
@@ -601,6 +680,9 @@ async def admin_health(admin: dict = Depends(require("admin"))):
             "elements": await db.elements.count_documents({}),
             "elements_active": await db.elements.count_documents({"status": {"$ne": "zarchiwizowany"}}),
             "reports": await db.daily_reports.count_documents({}),
+            "files_total": await db.files.count_documents({}),
+            "files_in_object_storage": await db.files.count_documents({"storage_path": {"$exists": True}}),
+            "files_utracone": await db.files.count_documents({"status": "utracony"}),
         },
     }
 
@@ -672,21 +754,32 @@ async def update_user(user_id: str, body: UpdateUserIn, admin: dict = Depends(re
 
 
 class AdminSetPwIn(BaseModel):
-    nowe: str
+    nowe: Optional[str] = None
+
+
+# B3: crypto-random generated password, fixed length 16 (>= PASSWORD_MIN=14).
+_PW_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#%&*"
+
+
+def generate_password(length: int = 16) -> str:
+    return "".join(secrets.choice(_PW_ALPHABET) for _ in range(length))
 
 
 @api.post("/users/{user_id}/reset-password")
 async def admin_reset_password(user_id: str, body: AdminSetPwIn, admin: dict = Depends(require("admin"))):
-    """Admin sets/resets any user's password; user must change it on next login."""
-    if len(body.nowe) < PASSWORD_MIN:
+    """Admin resets a user's password. If no password is provided, the backend
+    generates a crypto-random 16-char one (B3) and returns it once. The user
+    must change it on next login."""
+    nowe = body.nowe or generate_password()
+    if len(nowe) < PASSWORD_MIN:
         raise HTTPException(422, f"Hasło musi mieć min. {PASSWORD_MIN} znaków / Password min {PASSWORD_MIN} chars")
     u = await db.users.find_one({"id": user_id})
     if not u:
         raise HTTPException(404, "Nie znaleziono")
     await db.users.update_one({"id": user_id}, {"$set": {
-        "hash": hash_pw(body.nowe), "must_change_password": True}})
+        "hash": hash_pw(nowe), "must_change_password": True}})
     await audit(admin["id"], "reset_hasla", "user", user_id)
-    return {"reset": True}
+    return {"reset": True, "nowe": nowe}
 
 
 @api.patch("/users/{user_id}/archive")
@@ -792,7 +885,9 @@ async def update_project(project_id: str, body: ProjectIn, admin: dict = Depends
     old = await db.projects.find_one({"id": project_id})
     if not old:
         raise HTTPException(404, "Nie znaleziono")
-    await db.projects.update_one({"id": project_id}, {"$set": body.model_dump()})
+    # A2: partial update — only fields actually sent by the client are written,
+    # so an edit form sending a subset never wipes data_start/vat_tryb/logo etc.
+    await db.projects.update_one({"id": project_id}, {"$set": body.model_dump(exclude_unset=True)})
     await audit(admin["id"], "edycja_projektu", "project", project_id,
                 {"nazwa": old.get("nazwa"), "tryb_rozliczenia": old.get("tryb_rozliczenia"),
                  "stawka_sprzedazy_godz": old.get("stawka_sprzedazy_godz")},
@@ -992,7 +1087,7 @@ async def week_summary(project_id: str, tydzien_od: str = Query(...),
 # EXTRA HOURS
 # ===========================================================================
 @api.post("/extra-hours", status_code=201)
-async def create_extra(body: ExtraHoursIn, user: dict = Depends(current_user)):
+async def create_extra(body: ExtraHoursIn, user: dict = Depends(require("admin", "foreman", "subcontractor", "worker"))):
     doc = body.model_dump()
     doc.update({"id": new_id(), "company_id": COMPANY_ID, "user_id": user["id"],
                 "status": "naliczone", "zatwierdzil_id": None,
@@ -1086,7 +1181,7 @@ async def delete_reason(rid: str, admin: dict = Depends(require("admin"))):
 # DAILY REPORTS
 # ===========================================================================
 @api.post("/reports", status_code=201)
-async def create_report(body: ReportIn, user: dict = Depends(current_user)):
+async def create_report(body: ReportIn, user: dict = Depends(require("admin", "foreman", "subcontractor", "worker"))):
     project = await db.projects.find_one({"id": body.project_id})
     if not project:
         raise HTTPException(404, "Nie znaleziono projektu")
@@ -1429,6 +1524,12 @@ async def delivery_status(did: str, body: DeliveryStatusIn, user: dict = Depends
 
 @api.delete("/deliveries/{did}")
 async def delete_delivery(did: str, user: dict = Depends(current_user)):
+    d = await db.deliveries.find_one({"id": did})
+    if not d:
+        raise HTTPException(404, "Nie znaleziono")
+    # E1b: only the author or a manager may archive a delivery notice.
+    if d.get("autor_id") != user["id"] and user.get("rola") not in ("admin", "foreman"):
+        raise HTTPException(403, "Brak uprawnień / Not allowed")
     await db.deliveries.update_one({"id": did}, {"$set": {"status": "zarchiwizowana"}})
     await audit(user["id"], "archiwizacja_dostawy", "delivery", did)
     return {"archived": True}
@@ -1494,27 +1595,49 @@ async def upload_file(file: UploadFile = File(...), kind: str = Form("attachment
         raise HTTPException(413, "Plik za duży (max 20MB) / File too large")
     fid = new_id()
     ext = Path(file.filename or "").suffix.lower() or (mimetypes.guess_extension(file.content_type or "") or "")
-    path = UPLOAD_DIR / f"{fid}{ext}"
-    with open(path, "wb") as f:
-        f.write(data)
+    # A1: permanent object storage — survives container redeploys.
+    storage_path = f"{STORAGE_APP_NAME}/uploads/{user['id']}/{fid}{ext}"
+    try:
+        await storage_put(storage_path, data, file.content_type or "application/octet-stream")
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code == 402:
+            raise HTTPException(402, "Brak środków na magazyn plików — doładuj klucz / Storage credits exhausted")
+        logger.error(f"storage upload failed ({e.response.status_code}): {e}")
+        raise HTTPException(503, "Magazyn plików niedostępny, spróbuj ponownie / File storage unavailable, retry")
+    except Exception as e:
+        logger.error(f"storage upload failed: {e}")
+        raise HTTPException(503, "Magazyn plików niedostępny, spróbuj ponownie / File storage unavailable, retry")
     doc = {"id": fid, "company_id": COMPANY_ID, "owner_id": user["id"], "kind": kind,
            "original_name": (file.filename or "plik")[:255], "content_type": file.content_type,
-           "size_bytes": len(data), "path": str(path), "status": "active", "created_at": now_iso()}
+           "size_bytes": len(data), "storage_path": storage_path, "status": "active",
+           "created_at": now_iso()}
     await db.files.insert_one(doc)
-    base = os.environ.get("EXPO_PUBLIC_BACKEND_URL", "")
     return {"id": fid, "name": doc["original_name"], "contentType": file.content_type,
             "sizeBytes": len(data), "url": f"/api/files/{fid}/content"}
 
 
 @api.get("/files/{file_id}/content")
 async def file_content(file_id: str, download: int = 0):
-    doc = await db.files.find_one({"id": file_id, "status": "active"})
+    doc = await db.files.find_one({"id": file_id})
     if not doc:
         raise HTTPException(404, "Nie znaleziono pliku")
-    p = Path(doc["path"])
-    if not p.exists():
-        raise HTTPException(404, "Plik nie istnieje")
+    if doc.get("status") == "utracony":
+        raise HTTPException(410, "Plik utracony (sprzed migracji magazynu) / File lost before storage migration")
     disp = "attachment" if download else "inline"
+    # New records: object storage. Legacy records: local disk fallback.
+    if doc.get("storage_path"):
+        try:
+            content, ctype = await storage_get(doc["storage_path"])
+        except Exception as e:
+            logger.error(f"storage read failed for {file_id}: {e}")
+            raise HTTPException(503, "Magazyn plików niedostępny / File storage unavailable")
+        return StreamingResponse(iter([content]), media_type=doc.get("content_type") or ctype,
+                                 headers={"Content-Disposition": f'{disp}; filename="{doc["original_name"]}"'})
+    p = Path(doc.get("path") or "")
+    if not doc.get("path") or not p.exists():
+        # Orphan: DB record exists but the container file is gone (pre-A1 redeploy).
+        await db.files.update_one({"id": file_id}, {"$set": {"status": "utracony"}})
+        raise HTTPException(410, "Plik utracony (sprzed migracji magazynu) / File lost before storage migration")
 
     def it():
         with open(p, "rb") as f:
@@ -1558,8 +1681,11 @@ async def transcribe(file: UploadFile = File(...), language: str = Form("pl"),
 # PUSH
 # ===========================================================================
 @api.post("/register-push", status_code=201)
-async def register_push(body: RegisterPushIn):
-    resp = await push_client.post("/api/v1/push/users/register", json=body.model_dump())
+async def register_push(body: RegisterPushIn, user: dict = Depends(current_user)):
+    # E1b: authenticated + a user may only register a token for themselves.
+    payload = body.model_dump()
+    payload["user_id"] = user["id"]
+    resp = await push_client.post("/api/v1/push/users/register", json=payload)
     if resp.status_code == 401:
         raise HTTPException(500, "EMERGENT_PUSH_KEY missing or invalid")
     if resp.status_code >= 500:
@@ -2025,6 +2151,23 @@ async def startup():
         {"$set": {"geometria_typ": "punkt", "geometria_json": None}})
     if mig.modified_count:
         logger.info(f"migrated {mig.modified_count} elements to geometria_typ=punkt")
+    # A1 (pre-authorized): one-time orphan sweep — legacy local-disk records whose
+    # file no longer exists on the container are marked utracony (never deleted).
+    orphan_query = {"storage_path": {"$exists": False}, "status": {"$ne": "utracony"}}
+    orphan_candidates = await db.files.count_documents(orphan_query)
+    marked = 0
+    if orphan_candidates:
+        async for f in db.files.find(orphan_query, {"id": 1, "path": 1}):
+            if not f.get("path") or not Path(f["path"]).exists():
+                await db.files.update_one({"id": f["id"]}, {"$set": {"status": "utracony"}})
+                marked += 1
+        logger.warning(f"A1 orphan sweep: {orphan_candidates} legacy file records checked, {marked} marked utracony")
+    # A1: warm up object storage key (non-fatal if unavailable at boot).
+    try:
+        await _init_storage()
+        logger.info("object storage initialized")
+    except Exception as e:
+        logger.warning(f"object storage init failed (will retry on first upload): {e}")
     # Seed the initial admin only when credentials are provided via environment.
     if ADMIN_EMAIL and ADMIN_PASSWORD:
         admin = await db.users.find_one({"email": ADMIN_EMAIL.lower()})
@@ -2075,9 +2218,13 @@ async def shutdown():
 
 
 app.include_router(api)
+# G2: JWT travels in the Authorization header (no cookies), so cross-origin
+# credentials are NOT needed. Disabling them removes the unsafe
+# allow_origins="*" + allow_credentials=True combination while keeping the
+# mobile app (origin-less native fetch) and web preview working.
 app.add_middleware(
     CORSMiddleware,
-    allow_credentials=True,
+    allow_credentials=False,
     allow_origins=["*"],
     allow_methods=["*"],
     allow_headers=["*"],

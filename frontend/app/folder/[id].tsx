@@ -54,7 +54,7 @@ export default function Folder() {
       const up = await uploadFile(fileObj, "view_drawing");
       setPic({ url: up.url, w: a.width, h: a.height });
       toast.show(t("saved"));
-    } catch { toast.show(t("error_generic"), "error"); }
+    } catch (e: any) { toast.show(e.message || t("error_generic"), "error"); }
     finally { setUploading(false); }
   };
 
