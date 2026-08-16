@@ -38,7 +38,7 @@
         "android.permission.WRITE_EXTERNAL_STORAGE"
       ],
       "softwareKeyboardMode": "adjustResize",
-      "versionCode": 127,
+      "versionCode": 130,
       "allowBackup": false
     },
     "web": {

@@ -86,3 +86,10 @@ ODŁOŻONE (dedykowana tura, za duże/ryzykowne na resztę budżetu): D — wsp�
 - Testy: iter12 (backend 10/10 po poprawce B5), iter13 (frontend 6/6)
 - Sprawozdanie: /app/memory/SPRAWOZDANIE-RUNDA-1.3.md
 - UWAGA TECHNICZNA dla agentów: NIE wykonywać wielu search_replace RÓWNOLEGLE na TYM SAMYM pliku — edycje się gubią (3 przypadki w tej sesji).
+
+## Runda 1.3 — poprawka D po teście na urządzeniu (S24 FE, APK vc129) — 2026-06
+- editBar w view/[id].tsx objęty KeyboardStickyView (offset opened=insets.bottom) — pasek Seria/prefiks/numer jedzie nad klawiaturą
+- Modale z polami: KAV behavior="padding" na OBU platformach (wcześniej Android=undefined=no-op) + statusBarTranslucent/navigationBarTranslucent: modal "Dodaj element" (view/[id]), modal edycji użytkownika (users), ConfirmModal (pole "powód")
+- Kontekst techniczny: edgeToEdgeEnabled + targetSdk 36 ⇒ Android ignoruje adjustResize; obsługa klawiatury musi być komponentowa (keyboard-controller 1.18.5, KeyboardProvider już w root)
+- app.json versionCode → 130 (binarka właściciela miała 129; EAS auto-inkrementuje — app.json to dolna granica)
+- Formularze (report/issue/delivery/project) już wcześniej na KeyboardStickyView — bez zmian

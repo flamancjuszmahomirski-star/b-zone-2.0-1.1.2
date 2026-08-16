@@ -1,5 +1,5 @@
 import React, { useState, useCallback } from "react";
-import { View, Text, StyleSheet, ScrollView, Pressable, Modal, TextInput, RefreshControl, KeyboardAvoidingView, Platform, Clipboard } from "react-native";
+import { View, Text, StyleSheet, ScrollView, Pressable, Modal, TextInput, RefreshControl, KeyboardAvoidingView, Clipboard } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useFocusEffect } from "expo-router";
 import { colors, spacing, font, radius } from "@/src/theme/tokens";
@@ -158,8 +158,8 @@ export default function Users() {
         </ScrollView>
       )}
 
-      <Modal visible={!!editUser} transparent animationType="slide" onRequestClose={() => setEditUser(null)}>
-        <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={{ flex: 1 }}>
+      <Modal visible={!!editUser} transparent statusBarTranslucent navigationBarTranslucent animationType="slide" onRequestClose={() => setEditUser(null)}>
+        <KeyboardAvoidingView behavior="padding" style={{ flex: 1 }}>
         <Pressable style={styles.backdrop} onPress={() => setEditUser(null)}>
           <Pressable style={styles.sheet} onPress={() => {}}>
             <View style={styles.handle} />

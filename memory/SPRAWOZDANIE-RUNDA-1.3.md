@@ -1,3 +1,12 @@
+## 0b. Poprawka D po odrzuceniu na urządzeniu (S24 FE, APK vc129)
+Diagnoza potwierdzona: (1) editBar bez obsługi klawiatury, (2) KAV z `behavior: undefined` na Androidzie = no-op, (3) edge-to-edge + targetSdk 36 ⇒ `adjustResize` ignorowane — wpis w app.json nie działa.
+Poprawki:
+- `view/[id].tsx` editBar → **KeyboardStickyView** (react-native-keyboard-controller 1.18.5, provider już w root) z offsetem `opened: insets.bottom` — identyczny wzorzec jak stopka formularza raportu (działający na urządzeniu).
+- Modale z polami tekstowymi → `KeyboardAvoidingView behavior="padding"` na OBU platformach + `statusBarTranslucent navigationBarTranslucent` (wymagane przy edge-to-edge do poprawnego pomiaru): „Dodaj element" (view/[id]), edycja użytkownika (users), **ConfirmModal** (pole „powód" przy odrzuceniu/cofnięciu odbioru — też było zakrywane).
+- Audyt tabeli D pod `behavior: undefined`: pozostałe wystąpienia = 0 (grep). Formularze report/issue/delivery/project już na KeyboardStickyView/KeyboardAwareScrollView.
+- Uwaga do wersji lib: KeyboardStickyView w 1.18.5 nie działa WEWNĄTRZ natywnego Modala (znane ograniczenie biblioteki) — dlatego w modalach użyto KAV padding, a StickyView tylko na płaskich ekranach.
+- app.json versionCode → **130** (fakt: binarka z testu = 129).
+
 # SPRAWOZDANIE — RUNDA 1.3 (v1.0.9)
 
 ## 0. Kontra-audit (poprawki przed publikacją)

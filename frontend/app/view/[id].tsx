@@ -1,5 +1,6 @@
 import React, { useState, useCallback, useRef } from "react";
-import { View, Text, StyleSheet, Pressable, Modal, TextInput, ScrollView, ActivityIndicator, Dimensions, KeyboardAvoidingView, Platform } from "react-native";
+import { View, Text, StyleSheet, Pressable, Modal, TextInput, ScrollView, ActivityIndicator, Dimensions, KeyboardAvoidingView } from "react-native";
+import { KeyboardStickyView } from "react-native-keyboard-controller";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Image } from "expo-image";
 import { Ionicons } from "@expo/vector-icons";
@@ -217,20 +218,24 @@ export default function ViewCanvas() {
       </View>
 
       {mode === "edit" && (
-        <View style={[styles.editBar, { paddingBottom: insets.bottom + spacing.sm }]}>
-          <Pressable testID="series-toggle" onPress={() => setSeries((s) => !s)} style={[styles.seriesChip, series && styles.seriesChipActive]}>
-            <Ionicons name="layers-outline" size={16} color={series ? "#fff" : colors.brand} />
-            <Text style={[styles.seriesText, series && { color: "#fff" }]}>{t("series_mode")}</Text>
-          </Pressable>
-          {series ? (
-            <View style={styles.seriesForm}>
-              <TextInput testID="series-prefix" value={prefix} onChangeText={setPrefix} placeholder={t("series_prefix")} placeholderTextColor={colors.muted} style={styles.seriesInput} />
-              <TextInput testID="series-start" value={String(nextNum)} onChangeText={(v) => setNextNum(parseInt(v) || 1)} keyboardType="number-pad" style={[styles.seriesInput, { width: 70 }]} />
-            </View>
-          ) : (
-            <Text style={styles.editHint}>{t("tap_to_place")}</Text>
-          )}
-        </View>
+        // D: bottom edit bar must ride on top of the keyboard (Android edge-to-edge
+        // ignores adjustResize, so plain padding is not enough).
+        <KeyboardStickyView offset={{ closed: 0, opened: insets.bottom }}>
+          <View style={[styles.editBar, { paddingBottom: insets.bottom + spacing.sm }]}>
+            <Pressable testID="series-toggle" onPress={() => setSeries((s) => !s)} style={[styles.seriesChip, series && styles.seriesChipActive]}>
+              <Ionicons name="layers-outline" size={16} color={series ? "#fff" : colors.brand} />
+              <Text style={[styles.seriesText, series && { color: "#fff" }]}>{t("series_mode")}</Text>
+            </Pressable>
+            {series ? (
+              <View style={styles.seriesForm}>
+                <TextInput testID="series-prefix" value={prefix} onChangeText={setPrefix} placeholder={t("series_prefix")} placeholderTextColor={colors.muted} style={styles.seriesInput} />
+                <TextInput testID="series-start" value={String(nextNum)} onChangeText={(v) => setNextNum(parseInt(v) || 1)} keyboardType="number-pad" style={[styles.seriesInput, { width: 70 }]} />
+              </View>
+            ) : (
+              <Text style={styles.editHint}>{t("tap_to_place")}</Text>
+            )}
+          </View>
+        </KeyboardStickyView>
       )}
 
       {canEdit && mode !== "edit" && (
@@ -247,8 +252,8 @@ export default function ViewCanvas() {
       )}
 
       {/* add element modal */}
-      <Modal visible={!!pendingPos} transparent animationType="fade" onRequestClose={() => setPendingPos(null)}>
-        <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={{ flex: 1 }}>
+      <Modal visible={!!pendingPos} transparent statusBarTranslucent navigationBarTranslucent animationType="fade" onRequestClose={() => setPendingPos(null)}>
+        <KeyboardAvoidingView behavior="padding" style={{ flex: 1 }}>
         <Pressable style={styles.backdrop} onPress={() => setPendingPos(null)}>
           <Pressable style={styles.sheet} onPress={() => {}}>
             <Text style={styles.sheetTitle}>{t("add_element")}</Text>
